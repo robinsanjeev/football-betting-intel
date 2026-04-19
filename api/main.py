@@ -735,6 +735,13 @@ def signals_history(
     conn = _get_db_connection()
     try:
         _ensure_signal_history_table(conn)
+        _ensure_trades_table(conn)
+
+        # Build lookup of which (match, description) combos have trades placed
+        trade_lookup = set()
+        for tr in conn.execute("SELECT match, side FROM trades").fetchall():
+            trade_lookup.add((tr["match"], tr["side"]))
+
         query = "SELECT * FROM signal_history WHERE 1=1"
         params: list = []
         if competition:
@@ -780,6 +787,7 @@ def signals_history(
                 "league_emblem": r["league_emblem"] or "",
                 "outcome": r["outcome"],
                 "actual_pnl": r["actual_pnl"],
+                "bet_placed": (r["match_title"], r["description"]) in trade_lookup,
             })
         return {"signals": signals, "total": total}
     finally:

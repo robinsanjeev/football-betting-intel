@@ -138,6 +138,8 @@ export default function PerformanceAccuracy() {
         confidence: s.confidence,
         homeCrest: s.home_crest,
         awayCrest: s.away_crest,
+        actualPnl: s.actual_pnl,
+        betPlaced: s.bet_placed ?? false,
       }
     })
   }, [signalHistory])
@@ -218,7 +220,7 @@ export default function PerformanceAccuracy() {
 
   // CSV export
   const exportCsv = () => {
-    const headers = ['Date', 'Match', 'Bet Type', 'Recommendation', 'Model %', 'Market %', 'Edge %', 'Upside ¢', 'Stake', 'Odds', 'Result', 'PnL', 'Hypothetical PnL']
+    const headers = ['Date', 'Match', 'Bet Type', 'Recommendation', 'Model %', 'Market %', 'Edge %', 'Upside ¢', 'Stake', 'Odds', 'Result', 'Actual PnL', 'Bet Placed', 'Hypothetical PnL']
     const rows = filteredTrades.map((t) => [
       new Date(t.timestamp).toLocaleDateString(),
       t.match,
@@ -231,7 +233,8 @@ export default function PerformanceAccuracy() {
       t.stake.toFixed(2),
       t.odds.toFixed(2),
       t.result,
-      t.pnl.toFixed(2),
+      t.actualPnl.toFixed(2),
+      t.betPlaced ? 'Yes' : 'No',
       t.hypotheticalPnl !== null ? t.hypotheticalPnl.toFixed(2) : 'pending',
     ])
     const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
@@ -567,13 +570,14 @@ export default function PerformanceAccuracy() {
                       <SortableHeader label="Upside" sortKey="upside" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
                       <th className="px-3 py-2.5 text-left text-[10px] uppercase tracking-widest text-[#6b6b8a] font-medium whitespace-nowrap">Conf.</th>
                       <SortableHeader label="Result" sortKey="result" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-                      <th className="px-3 py-2.5 text-left text-[10px] uppercase tracking-widest text-[#6b6b8a] font-medium whitespace-nowrap">Exp. Value</th>
+                      <th className="px-3 py-2.5 text-left text-[10px] uppercase tracking-widest text-[#6b6b8a] font-medium whitespace-nowrap">Actual PnL</th>
+                      <th className="px-3 py-2.5 text-center text-[10px] uppercase tracking-widest text-[#6b6b8a] font-medium whitespace-nowrap">Bet</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredTrades.length === 0 && (
                       <tr>
-                        <td colSpan={11} className="px-3 py-8 text-center text-[#6b6b8a] text-xs">
+                        <td colSpan={13} className="px-3 py-8 text-center text-[#6b6b8a] text-xs">
                           No trades match the selected filter.
                         </td>
                       </tr>
@@ -624,9 +628,22 @@ export default function PerformanceAccuracy() {
                           <StatusBadge result={t.result} />
                         </td>
                         <td className="px-3 py-2.5 font-mono whitespace-nowrap">
-                          <span className={t.expectedValue >= 0 ? 'text-[#3ddc84]' : 'text-[#e84040]'}>
-                            {t.expectedValue >= 0 ? '+' : ''}${t.expectedValue.toFixed(2)}
-                          </span>
+                          {t.result === 'PENDING' ? (
+                            <span className="text-[#6b6b8a]">—</span>
+                          ) : (
+                            <span className={t.actualPnl >= 0 ? 'text-[#3ddc84]' : 'text-[#e84040]'}>
+                              {t.actualPnl >= 0 ? '+' : ''}${t.actualPnl.toFixed(2)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          {t.betPlaced ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[#9b6dff]/15 text-[#9b6dff] border border-[#9b6dff]/25">
+                              ✓ Placed
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-[#6b6b8a]">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}

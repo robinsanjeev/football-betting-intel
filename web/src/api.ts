@@ -59,6 +59,7 @@ export interface SignalHistoryEntry {
   league_emblem: string
   outcome: string
   actual_pnl: number
+  bet_placed: boolean
 }
 
 export interface SignalHistoryResponse {
