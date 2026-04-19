@@ -1,13 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   TrendingUp, TrendingDown, BarChart2, DollarSign, AlertCircle,
-  Activity, Target, ChevronDown, ChevronUp, Download,
+  Activity, ChevronDown, ChevronUp, Download,
 } from 'lucide-react'
 import { fetchPerformance, fetchAccuracy, fetchTrades, fetchSignalHistory } from '../api'
 import type { SignalHistoryEntry } from '../api'
 import MetricCard from '../components/MetricCard'
-import { CumulativePnlChart, WinLossChart } from '../components/PerformanceChart'
-import { CalibrationChart, RollingWinRateChart } from '../components/CalibrationChart'
+import { WinLossChart } from '../components/PerformanceChart'
 import type { Performance, Accuracy, Trade } from '../types'
 
 // ─── Results Table Types ────────────────────────────────────────────────────
@@ -331,41 +330,59 @@ export default function PerformanceAccuracy() {
             />
           </div>
 
-          {/* ── Charts Row ── */}
+          {/* ── Charts Row (settled only) ── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-            <CumulativePnlChart data={perfData.cumulative_pnl} />
-            <WinLossChart counts={perfData.win_loss_counts} />
-          </div>
-
-          {/* ── Accuracy Section ── */}
-          {accData && (
-            <>
-              <div className="flex items-center gap-2 mb-4 mt-8">
-                <Target size={16} className="text-[#9b6dff]" />
-                <h2 className="text-base font-semibold text-[#e2e2f0]">Model Accuracy</h2>
-                {accData.total_settled > 0 && (
-                  <span className="text-[11px] text-[#6b6b8a]">
-                    · {accData.total_settled} settled trades
-                  </span>
-                )}
-              </div>
-
-              {accData.total_settled === 0 ? (
-                <div className="card p-8 flex flex-col items-center gap-3 text-center mb-8">
-                  <Target size={20} className="text-[#6b6b8a]" />
-                  <p className="text-sm font-medium text-[#e2e2f0]">Not enough data yet</p>
-                  <p className="text-xs text-[#6b6b8a] max-w-sm">
-                    {accData.message || 'Calibration and accuracy charts will appear once trades settle.'}
-                  </p>
+            {/* Cumulative PnL from settled trades */}
+            <div className="card p-5">
+              <h3 className="text-sm font-semibold text-[#e2e2f0] mb-4">Cumulative PnL (Settled)</h3>
+              {settledStats.total === 0 ? (
+                <div className="flex items-center justify-center h-48">
+                  <p className="text-[#6b6b8a] text-sm">No settled trades yet</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
-                  <CalibrationChart data={accData.calibration} />
-                  <RollingWinRateChart data={accData.rolling_win_rate} />
+                <div className="space-y-2">
+                  {(() => {
+                    const sorted = [...settledTrades].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                    let cum = 0
+                    const series = sorted.map((t, i) => {
+                      cum += t.result === 'WIN' ? t.stake * (t.odds - 1) : -t.stake
+                      return { idx: i + 1, pnl: cum, result: t.result, match: t.match }
+                    })
+                    const maxAbs = Math.max(...series.map(s => Math.abs(s.pnl)), 1)
+                    return (
+                      <>
+                        <div className="flex items-end gap-1" style={{ height: '160px' }}>
+                          {series.map((s) => {
+                            const h = (Math.abs(s.pnl) / maxAbs) * 100
+                            return (
+                              <div key={s.idx} className="flex-1 flex flex-col items-center justify-end h-full" title={`Trade ${s.idx}: ${s.pnl >= 0 ? '+' : ''}$${s.pnl.toFixed(2)} (${s.match})`}>
+                                <div
+                                  className="w-full rounded-t transition-all"
+                                  style={{
+                                    height: `${Math.max(h, 3)}%`,
+                                    backgroundColor: s.pnl >= 0 ? '#3ddc84' : '#e84040',
+                                  }}
+                                />
+                              </div>
+                            )
+                          })}
+                        </div>
+                        <div className="flex justify-between text-[10px] text-[#6b6b8a] mt-2">
+                          <span>{series.length} settled trade{series.length !== 1 ? 's' : ''}</span>
+                          <span className={`font-mono font-semibold ${cum >= 0 ? 'text-[#3ddc84]' : 'text-[#e84040]'}`}>
+                            {cum >= 0 ? '+' : ''}${cum.toFixed(2)}
+                          </span>
+                        </div>
+                      </>
+                    )
+                  })()}
                 </div>
               )}
-            </>
-          )}
+            </div>
+
+            {/* Win/Loss breakdown (settled only, no PENDING bar) */}
+            <WinLossChart counts={{ WIN: settledStats.wins, LOSE: settledStats.losses, PENDING: 0 }} />
+          </div>
 
           {/* ── Results Table ── */}
           <div className="mt-8">
