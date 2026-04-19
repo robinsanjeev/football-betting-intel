@@ -331,134 +331,181 @@ export default function PerformanceAccuracy() {
           </div>
 
           {/* ── Charts Row (settled only) ── */}
-          <div className="grid grid-cols-1 gap-4 mb-6">
-            {/* Cumulative PnL over time (daily) */}
+          {/* ── Charts Row (side by side, rolling 7 days) ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            {/* Cumulative PnL over time (rolling 7 days) */}
             <div className="card p-5">
-              <h3 className="text-sm font-semibold text-[#e2e2f0] mb-1">Cumulative PnL Over Time</h3>
-              <p className="text-[10px] text-[#6b6b8a] mb-4">Daily running total from settled trades</p>
-              {settledStats.total === 0 ? (
-                <div className="flex items-center justify-center h-48">
-                  <p className="text-[#6b6b8a] text-sm">No settled trades yet</p>
-                </div>
-              ) : (
-                <div>
-                  {(() => {
-                    // Group settled trades by date, compute daily PnL, then cumulative
-                    const sorted = [...settledTrades].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-                    const byDate: Record<string, number> = {}
-                    for (const t of sorted) {
-                      const d = new Date(t.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                      const pnl = t.result === 'WIN' ? t.stake * (t.odds - 1) : -t.stake
-                      byDate[d] = (byDate[d] || 0) + pnl
-                    }
-                    const days = Object.entries(byDate)
-                    let cum = 0
-                    const series = days.map(([date, dailyPnl]) => {
-                      cum += dailyPnl
-                      return { date, dailyPnl, cumPnl: cum }
-                    })
-                    const maxCum = Math.max(...series.map(s => Math.abs(s.cumPnl)), 1)
-                    // Line chart using SVG
-                    const w = 100
-                    const h = 120
-                    const pad = 2
-                    const points = series.map((s, i) => {
-                      const x = series.length === 1 ? w / 2 : pad + (i / (series.length - 1)) * (w - 2 * pad)
-                      const y = h / 2 - (s.cumPnl / maxCum) * (h / 2 - pad)
-                      return { x, y, ...s }
-                    })
-                    const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
-                    const fillD = `${pathD} L${points[points.length - 1].x},${h / 2} L${points[0].x},${h / 2} Z`
-                    const lastPnl = series[series.length - 1]?.cumPnl ?? 0
-                    const color = lastPnl >= 0 ? '#3ddc84' : '#e84040'
-                    const fillColor = lastPnl >= 0 ? 'rgba(61,220,132,0.1)' : 'rgba(232,64,64,0.1)'
-                    return (
-                      <>
-                        <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: '180px' }} preserveAspectRatio="none">
-                          {/* Zero line */}
-                          <line x1={0} y1={h / 2} x2={w} y2={h / 2} stroke="#1e1e3a" strokeWidth="0.3" strokeDasharray="1,1" />
-                          {/* Fill */}
-                          <path d={fillD} fill={fillColor} />
-                          {/* Line */}
-                          <path d={pathD} fill="none" stroke={color} strokeWidth="0.8" strokeLinecap="round" strokeLinejoin="round" />
-                          {/* Dots */}
-                          {points.map((p, i) => (
-                            <circle key={i} cx={p.x} cy={p.y} r="1.2" fill={color} stroke="#0d0d14" strokeWidth="0.4">
-                              <title>{p.date}: {p.cumPnl >= 0 ? '+' : ''}${p.cumPnl.toFixed(2)} (day: {p.dailyPnl >= 0 ? '+' : ''}${p.dailyPnl.toFixed(2)})</title>
-                            </circle>
-                          ))}
-                        </svg>
-                        <div className="flex justify-between text-[10px] text-[#6b6b8a] mt-1 px-1">
-                          <span>{series[0]?.date}</span>
-                          <span className={`font-mono font-semibold ${lastPnl >= 0 ? 'text-[#3ddc84]' : 'text-[#e84040]'}`}>
-                            {lastPnl >= 0 ? '+' : ''}${lastPnl.toFixed(2)}
-                          </span>
-                          <span>{series[series.length - 1]?.date}</span>
-                        </div>
-                      </>
-                    )
-                  })()}
-                </div>
-              )}
+              <h3 className="text-sm font-semibold text-[#e2e2f0] mb-1">Cumulative PnL</h3>
+              <p className="text-[10px] text-[#6b6b8a] mb-4">Rolling 7-day view — settled trades only</p>
+              {(() => {
+                // Build 7-day date range ending today
+                const today = new Date()
+                const dates: string[] = []
+                const dateKeys: string[] = []
+                for (let i = 6; i >= 0; i--) {
+                  const d = new Date(today)
+                  d.setDate(d.getDate() - i)
+                  dates.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))
+                  dateKeys.push(d.toISOString().slice(0, 10))
+                }
+
+                // Group settled trades by ISO date
+                const pnlByDate: Record<string, number> = {}
+                for (const t of settledTrades) {
+                  const dk = new Date(t.timestamp).toISOString().slice(0, 10)
+                  const pnl = t.result === 'WIN' ? t.stake * (t.odds - 1) : -t.stake
+                  pnlByDate[dk] = (pnlByDate[dk] || 0) + pnl
+                }
+
+                // Compute cumulative PnL up to each day
+                // First, get cumulative before the 7-day window
+                const allSorted = [...settledTrades].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                let priorCum = 0
+                for (const t of allSorted) {
+                  const dk = new Date(t.timestamp).toISOString().slice(0, 10)
+                  if (dk < dateKeys[0]) {
+                    priorCum += t.result === 'WIN' ? t.stake * (t.odds - 1) : -t.stake
+                  }
+                }
+
+                let cum = priorCum
+                const series = dateKeys.map((dk, i) => {
+                  const dailyPnl = pnlByDate[dk] || 0
+                  cum += dailyPnl
+                  return { date: dates[i], dailyPnl, cumPnl: cum, hasData: dk in pnlByDate }
+                })
+
+                const allZero = series.every(s => s.cumPnl === 0 && !s.hasData)
+                if (allZero) {
+                  return (
+                    <div className="flex items-center justify-center h-48">
+                      <p className="text-[#6b6b8a] text-sm">No settled trades in the last 7 days</p>
+                    </div>
+                  )
+                }
+
+                const maxCum = Math.max(...series.map(s => Math.abs(s.cumPnl)), 0.01)
+                const w = 100
+                const h = 120
+                const pad = 4
+                const points = series.map((s, i) => {
+                  const x = pad + (i / 6) * (w - 2 * pad)
+                  const y = h / 2 - (s.cumPnl / maxCum) * (h / 2 - pad)
+                  return { x, y, ...s }
+                })
+                const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
+                const fillD = `${pathD} L${points[6].x},${h / 2} L${points[0].x},${h / 2} Z`
+                const lastPnl = series[6].cumPnl
+                const color = lastPnl >= 0 ? '#3ddc84' : '#e84040'
+                const fillColor = lastPnl >= 0 ? 'rgba(61,220,132,0.08)' : 'rgba(232,64,64,0.08)'
+
+                return (
+                  <>
+                    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: '180px' }} preserveAspectRatio="none">
+                      <line x1={0} y1={h / 2} x2={w} y2={h / 2} stroke="#1e1e3a" strokeWidth="0.3" strokeDasharray="1,1" />
+                      <path d={fillD} fill={fillColor} />
+                      <path d={pathD} fill="none" stroke={color} strokeWidth="0.7" strokeLinecap="round" strokeLinejoin="round" />
+                      {points.map((p, i) => (
+                        <circle key={i} cx={p.x} cy={p.y} r={p.hasData ? 1.4 : 0.8} fill={p.hasData ? color : '#6b6b8a'} stroke="#0d0d14" strokeWidth="0.3">
+                          <title>{p.date}: {p.cumPnl >= 0 ? '+' : ''}${p.cumPnl.toFixed(2)}{p.hasData ? ` (day: ${p.dailyPnl >= 0 ? '+' : ''}$${p.dailyPnl.toFixed(2)})` : ' (no trades)'}</title>
+                        </circle>
+                      ))}
+                    </svg>
+                    <div className="flex justify-between text-[9px] text-[#6b6b8a] mt-1 px-1">
+                      {dates.map((d, i) => (
+                        <span key={i} className={series[i].hasData ? 'text-[#a0a0c0]' : ''}>{d.split(' ')[1]}</span>
+                      ))}
+                    </div>
+                    <div className="text-center text-[10px] mt-2">
+                      <span className={`font-mono font-semibold ${lastPnl >= 0 ? 'text-[#3ddc84]' : 'text-[#e84040]'}`}>
+                        {lastPnl >= 0 ? '+' : ''}${lastPnl.toFixed(2)}
+                      </span>
+                      <span className="text-[#6b6b8a]"> cumulative</span>
+                    </div>
+                  </>
+                )
+              })()}
             </div>
 
-            {/* Daily bets stacked bar (Wins vs Losses) */}
+            {/* Daily bets stacked bar (rolling 7 days) */}
             <div className="card p-5">
-              <h3 className="text-sm font-semibold text-[#e2e2f0] mb-1">Daily Settled Bets</h3>
-              <p className="text-[10px] text-[#6b6b8a] mb-4">Stacked wins (green) and losses (red) per day</p>
-              {settledStats.total === 0 ? (
-                <div className="flex items-center justify-center h-32">
-                  <p className="text-[#6b6b8a] text-sm">No settled trades yet</p>
-                </div>
-              ) : (
-                <div>
-                  {(() => {
-                    const sorted = [...settledTrades].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-                    const byDate: Record<string, { wins: number; losses: number }> = {}
-                    for (const t of sorted) {
-                      const d = new Date(t.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                      if (!byDate[d]) byDate[d] = { wins: 0, losses: 0 }
-                      if (t.result === 'WIN') byDate[d].wins++
-                      else byDate[d].losses++
-                    }
-                    const days = Object.entries(byDate).map(([date, counts]) => ({ date, ...counts, total: counts.wins + counts.losses }))
-                    const maxTotal = Math.max(...days.map(d => d.total), 1)
-                    return (
-                      <>
-                        <div className="flex items-end gap-1.5" style={{ height: '120px' }}>
-                          {days.map((d) => {
-                            const winH = (d.wins / maxTotal) * 100
-                            const loseH = (d.losses / maxTotal) * 100
-                            return (
-                              <div key={d.date} className="flex-1 flex flex-col items-center justify-end h-full" title={`${d.date}: ${d.wins}W / ${d.losses}L`}>
-                                <div className="w-full flex flex-col justify-end">
-                                  {d.wins > 0 && (
-                                    <div className="w-full rounded-t" style={{ height: `${Math.max(winH, 4)}px`, backgroundColor: '#3ddc84', minHeight: '3px' }} />
-                                  )}
-                                  {d.losses > 0 && (
-                                    <div className="w-full" style={{ height: `${Math.max(loseH, 4)}px`, backgroundColor: '#e84040', minHeight: '3px', borderRadius: d.wins > 0 ? '0' : '4px 4px 0 0' }} />
-                                  )}
-                                </div>
-                                <span className="text-[8px] text-[#6b6b8a] mt-1 truncate w-full text-center">{d.date}</span>
+              <h3 className="text-sm font-semibold text-[#e2e2f0] mb-1">Daily Bets</h3>
+              <p className="text-[10px] text-[#6b6b8a] mb-4">Wins vs losses per day — last 7 days</p>
+              {(() => {
+                const today = new Date()
+                const dates: string[] = []
+                const dateKeys: string[] = []
+                for (let i = 6; i >= 0; i--) {
+                  const d = new Date(today)
+                  d.setDate(d.getDate() - i)
+                  dates.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))
+                  dateKeys.push(d.toISOString().slice(0, 10))
+                }
+
+                const byDate: Record<string, { wins: number; losses: number }> = {}
+                for (const t of settledTrades) {
+                  const dk = new Date(t.timestamp).toISOString().slice(0, 10)
+                  if (!byDate[dk]) byDate[dk] = { wins: 0, losses: 0 }
+                  if (t.result === 'WIN') byDate[dk].wins++
+                  else byDate[dk].losses++
+                }
+
+                const days = dateKeys.map((dk, i) => {
+                  const counts = byDate[dk] || { wins: 0, losses: 0 }
+                  return { date: dates[i], dateKey: dk, ...counts, total: counts.wins + counts.losses }
+                })
+
+                const maxTotal = Math.max(...days.map(d => d.total), 1)
+                const hasAny = days.some(d => d.total > 0)
+
+                if (!hasAny) {
+                  return (
+                    <div className="flex items-center justify-center h-48">
+                      <p className="text-[#6b6b8a] text-sm">No settled trades in the last 7 days</p>
+                    </div>
+                  )
+                }
+
+                return (
+                  <>
+                    <div className="flex items-end gap-2" style={{ height: '160px' }}>
+                      {days.map((d) => {
+                        const winH = maxTotal > 0 ? (d.wins / maxTotal) * 130 : 0
+                        const loseH = maxTotal > 0 ? (d.losses / maxTotal) * 130 : 0
+                        return (
+                          <div key={d.dateKey} className="flex-1 flex flex-col items-center justify-end h-full" title={`${d.date}: ${d.wins}W / ${d.losses}L`}>
+                            {d.total === 0 ? (
+                              <div className="w-full flex items-end justify-center h-full">
+                                <div className="w-full h-[2px] bg-[#1e1e3a] rounded" />
                               </div>
-                            )
-                          })}
-                        </div>
-                        <div className="flex items-center gap-4 justify-center mt-3 text-[10px]">
-                          <span className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-sm bg-[#3ddc84]"></span>
-                            <span className="text-[#a0a0c0]">Wins ({settledStats.wins})</span>
-                          </span>
-                          <span className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-sm bg-[#e84040]"></span>
-                            <span className="text-[#a0a0c0]">Losses ({settledStats.losses})</span>
-                          </span>
-                        </div>
-                      </>
-                    )
-                  })()}
-                </div>
-              )}
+                            ) : (
+                              <div className="w-full flex flex-col justify-end">
+                                {d.wins > 0 && (
+                                  <div className="w-full rounded-t" style={{ height: `${Math.max(winH, 4)}px`, backgroundColor: '#3ddc84' }} />
+                                )}
+                                {d.losses > 0 && (
+                                  <div className="w-full" style={{ height: `${Math.max(loseH, 4)}px`, backgroundColor: '#e84040', borderRadius: d.wins === 0 ? '4px 4px 0 0' : '0' }} />
+                                )}
+                              </div>
+                            )}
+                            <span className="text-[9px] text-[#6b6b8a] mt-1.5">{d.date.split(' ')[1]}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <div className="flex items-center gap-4 justify-center mt-3 text-[10px]">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-sm bg-[#3ddc84]"></span>
+                        <span className="text-[#a0a0c0]">Wins ({settledStats.wins})</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-sm bg-[#e84040]"></span>
+                        <span className="text-[#a0a0c0]">Losses ({settledStats.losses})</span>
+                      </span>
+                    </div>
+                  </>
+                )
+              })()}
             </div>
           </div>
 
