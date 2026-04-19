@@ -1,0 +1,11 @@
+web/node_modules
+web/dist
+__pycache__
+*.pyc
+.git
+.DS_Store
+data/*.db
+data/*.json
+config/config.yaml
+config/keys/
+logs/
