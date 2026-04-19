@@ -82,6 +82,7 @@ export default function PerformanceAccuracy() {
   const [betTypeFilter, setBetTypeFilter] = useState('ALL')
   const [competitionFilter, setCompetitionFilter] = useState('ALL')
   const [confidenceFilter, setConfidenceFilter] = useState('ALL')
+  const [timeFilter, setTimeFilter] = useState('ALL') // ALL | 7d | 14d | 30d | 90d
   const [sortKey, setSortKey] = useState<SortKey>('timestamp')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
@@ -147,14 +148,25 @@ export default function PerformanceAccuracy() {
     })
   }, [signalHistory])
 
-  // Settled trades (respects dimension filters for KPIs + charts)
+  // Time filter cutoff
+  const timeCutoff = useMemo(() => {
+    if (timeFilter === 'ALL') return null
+    const days = parseInt(timeFilter)
+    if (isNaN(days)) return null
+    const d = new Date()
+    d.setDate(d.getDate() - days)
+    return d.getTime()
+  }, [timeFilter])
+
+  // Settled trades (respects all filters for KPIs + charts)
   const settledTrades = useMemo(() => {
     let result = enrichedTrades.filter((t) => t.result === 'WIN' || t.result === 'LOSE')
+    if (timeCutoff) result = result.filter((t) => new Date(t.timestamp).getTime() >= timeCutoff)
     if (betTypeFilter !== 'ALL') result = result.filter((t) => t.betType === betTypeFilter)
     if (competitionFilter !== 'ALL') result = result.filter((t) => t.competition === competitionFilter)
     if (confidenceFilter !== 'ALL') result = result.filter((t) => t.confidence === confidenceFilter)
     return result
-  }, [enrichedTrades, betTypeFilter, competitionFilter, confidenceFilter])
+  }, [enrichedTrades, timeCutoff, betTypeFilter, competitionFilter, confidenceFilter])
 
   const settledStats = useMemo(() => {
     const wins = settledTrades.filter((t) => t.result === 'WIN').length
@@ -201,6 +213,7 @@ export default function PerformanceAccuracy() {
   const filteredTrades = useMemo(() => {
     let result = [...enrichedTrades]
     if (hidePending) result = result.filter((t) => t.result !== 'PENDING')
+    if (timeCutoff) result = result.filter((t) => new Date(t.timestamp).getTime() >= timeCutoff)
     if (resultFilter !== 'ALL') result = result.filter((t) => t.result === resultFilter)
     if (betTypeFilter !== 'ALL') result = result.filter((t) => t.betType === betTypeFilter)
     if (competitionFilter !== 'ALL') result = result.filter((t) => t.competition === competitionFilter)
@@ -357,9 +370,21 @@ export default function PerformanceAccuracy() {
                 <option value="MEDIUM" className="bg-[#16162a] text-[#e2e2f0]">MEDIUM</option>
                 <option value="LOW" className="bg-[#16162a] text-[#e2e2f0]">LOW</option>
               </select>
-              {(betTypeFilter !== 'ALL' || competitionFilter !== 'ALL' || confidenceFilter !== 'ALL') && (
+              <span className="w-px h-6 bg-[#1e1e3a] self-center" />
+              <select
+                value={timeFilter}
+                onChange={(e) => setTimeFilter(e.target.value)}
+                className="px-2.5 py-1.5 rounded-full text-[11px] font-medium border bg-transparent text-[#a0a0c0] border-[#1e1e3a] hover:border-[#2e2e5a] focus:outline-none focus:border-[#9b6dff]/50 transition-all appearance-none cursor-pointer"
+              >
+                <option value="ALL" className="bg-[#16162a] text-[#e2e2f0]">All Time</option>
+                <option value="7" className="bg-[#16162a] text-[#e2e2f0]">Last 7 days</option>
+                <option value="14" className="bg-[#16162a] text-[#e2e2f0]">Last 14 days</option>
+                <option value="30" className="bg-[#16162a] text-[#e2e2f0]">Last 30 days</option>
+                <option value="90" className="bg-[#16162a] text-[#e2e2f0]">Last 90 days</option>
+              </select>
+              {(betTypeFilter !== 'ALL' || competitionFilter !== 'ALL' || confidenceFilter !== 'ALL' || timeFilter !== 'ALL') && (
                 <button
-                  onClick={() => { setBetTypeFilter('ALL'); setCompetitionFilter('ALL'); setConfidenceFilter('ALL') }}
+                  onClick={() => { setBetTypeFilter('ALL'); setCompetitionFilter('ALL'); setConfidenceFilter('ALL'); setTimeFilter('ALL') }}
                   className="px-2.5 py-1.5 rounded-full text-[11px] font-medium text-[#e84040] border border-[#e84040]/20 hover:bg-[#e84040]/10 transition-all"
                 >
                   × Clear
