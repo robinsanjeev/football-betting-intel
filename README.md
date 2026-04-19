@@ -1,6 +1,6 @@
 # ⚽ Football Betting Intelligence
 
-A quantitative football (soccer) betting system that identifies positive expected value (EV) opportunities by combining statistical models with real-time market data from Kalshi and multiple bookmakers.
+AI-powered football betting signals using calibrated statistical models and real-time Kalshi market data.
 
 > **⚠️ Paper trading only.** This system tracks hypothetical bets for research purposes. No real money is wagered automatically.
 
@@ -9,91 +9,133 @@ A quantitative football (soccer) betting system that identifies positive expecte
 ## How It Works
 
 ```
-┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│  football-data.org│    │   The Odds API   │    │   Kalshi API     │
-│  (match results)  │    │ (bookmaker odds) │    │ (prediction mkts)│
-└────────┬─────────┘    └────────┬─────────┘    └────────┬─────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Data Ingestion Layer                        │
-│  football_data.py · odds_api.py · kalshi_soccer.py · adapters  │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Prediction Models                          │
-│  Calibrated Poisson (per-team attack/defense strengths)        │
-│  Historical calibration from ~875+ matches across top leagues  │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Strategy & Signals                          │
-│  EV calculation · Edge detection · Crowd vs. model sentiment   │
-│  Min-edge thresholds · Multi-market analysis per match         │
-└───────────┬─────────────────────────────────┬───────────────────┘
-            │                                 │
-            ▼                                 ▼
-┌───────────────────────┐         ┌───────────────────────┐
-│   Telegram Alerts     │         │   Paper Trade Ledger  │
-│   Real-time signals   │         │   SQLite tracking     │
-└───────────────────────┘         └───────────┬───────────┘
-                                              │
-                                              ▼
-                                  ┌───────────────────────┐
-                                  │    Web Dashboard      │
-                                  │  React + Vite + TW    │
-                                  │  FastAPI backend      │
-                                  └───────────────────────┘
+Historical Results (football-data.org)    Kalshi Live Markets    The Odds API
+         │                                       │                    │
+         ▼                                       ▼                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Data Ingestion Layer                             │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Calibrated Poisson Model                             │
+│  • Per-team attack/defense strengths (Dixon-Coles corrected)           │
+│  • Recency-weighted (60-day half-life — recent form counts more)       │
+│  • 875+ matches across EPL, Bundesliga, UCL                            │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      Signal Generation                                  │
+│  • Market-aware edge shrinkage (blends model with market by confidence)│
+│  • Min 8% edge threshold · 15% min win probability                     │
+│  • Edge cap at 25% · Confidence-based bet sizing                       │
+│  • Probability-adjusted EV scoring                                     │
+└───────────┬──────────────────────┬──────────────────────┬───────────────┘
+            │                      │                      │
+            ▼                      ▼                      ▼
+    Telegram Alerts       Paper Trade Ledger       Web Dashboard
+    (real-time)           (SQLite)                 (React + FastAPI)
+                                                         │
+                                                         ▼
+                                               Adaptive Feedback Loop
+                                               (auto-tunes thresholds
+                                                from settled results)
 ```
 
 ## Features
 
-### Prediction Model
-- **Calibrated Poisson model** with per-team attack and defense strength ratings
-- Trained on 12+ months of historical results from football-data.org
-- Covers scoreline probabilities, 1X2, over/under, BTTS, and first-half outcomes
-- Team name fuzzy matching across data sources (football-data.org ↔ Kalshi ↔ Odds API)
-
-### Market Coverage
-- **Kalshi** — Match-level prediction markets (moneyline, spread, over/under, BTTS, first-half)
-- **The Odds API** — Aggregated bookmaker odds across UK and EU regions
-- **football-data.org** — Historical match results for model calibration
-
-### Supported Competitions
-| League | Code |
-|---|---|
-| Premier League (England) | EPL |
-| Bundesliga (Germany) | BL1 |
-| La Liga (Spain) | PD |
-| Serie A (Italy) | SA |
-| Ligue 1 (France) | FL1 |
-| Eredivisie (Netherlands) | DED |
-| Primeira Liga (Portugal) | PPL |
-| Championship (England) | ELC |
-| Serie A (Brazil) | BSA |
-| UEFA Champions League | UCL |
-| FIFA World Cup | WC |
-| European Championships | EC |
+### Model
+- **Calibrated Poisson** with Dixon-Coles low-score correction
+- **Recency-weighted** — 60-day half-life exponential decay (last week counts 5x more than 3 months ago)
+- **Market-aware shrinkage** — blends model probability with market based on data confidence
+- Per-team attack/defense strength ratings across home and away contexts
+- Full scoreline probability matrix → 1X2, over/under, BTTS, spreads, first-half
 
 ### Signal Generation
-- Compares model probabilities against market-implied probabilities
-- Flags opportunities where model edge exceeds configurable threshold
-- Per-match multi-market analysis (all bet types evaluated simultaneously)
-- EV formula: `model_prob - market_implied_prob`
+- **8% minimum edge** threshold (filters noise)
+- **15% minimum win probability** (eliminates longshot bets)
+- **25% edge cap** (extreme divergences flagged as model uncertainty)
+- Probability-adjusted EV and scoring (high-prob + high-edge > low-prob + high-edge)
+- Confidence-based bet sizing hints (HIGH=full unit, MEDIUM=half, LOW=quarter)
 
-### Alerting & Tracking
-- **Telegram bot** sends formatted alerts with match details, probabilities, and EV
-- **Paper trade ledger** (SQLite) logs every signal with timestamps, odds, and outcomes
-- **Trade settlement** script to mark pending trades as WIN/LOSE after matches complete
+### Adaptive Feedback Loop
+- Automatically analyzes settled trade outcomes
+- Tunes thresholds per bet type, edge range, probability bucket, and confidence level
+- Raises min edge for losing bet types, lowers for profitable ones
+- Can auto-disable underperforming bet types or confidence levels
+- Persists learned parameters to JSON, survives restarts
+- Starts in "warming up" mode until 20+ trades settle
 
-### Web Dashboard
-- **React + TypeScript + Vite** frontend with Tailwind CSS
-- **FastAPI** backend serving signals, trades, and performance data
-- Pages: Active Signals, Performance & Accuracy, Trade Log, Model Insights, Documentation
-- Dark-themed card-based UI
-- Metrics: ROI, win rate, max drawdown, cumulative P&L, rolling accuracy
+### Market Coverage
+- **Kalshi** — Moneyline, spread, over/under, BTTS, first-half
+- **The Odds API** — Aggregated bookmaker odds (UK/EU)
+- **football-data.org** — Historical results for calibration
+
+### Supported Leagues
+| League | Code |
+|---|---|
+| Premier League | EPL |
+| Bundesliga | BL1 |
+| UEFA Champions League | UCL |
+
+### Dashboard (7 tabs)
+| Tab | Description |
+|---|---|
+| **Active Signals** | Current betting opportunities with bet type badges, win likelihood, reasoning |
+| **Performance** | Settled-only KPIs — win rate, ROI, cumulative PnL, max drawdown |
+| **Trade Log** | Full signal history with sortable columns |
+| **Model Insights** | Per-match deep dive — xG, team strengths, scoreline heatmap, goal distribution |
+| **Tuning** | Adaptive feedback loop — performance by type/edge/prob, current params, manual retune |
+| **Docs** | Full setup guide, API key instructions, NAS deployment tips |
+
+---
+
+## Quick Start
+
+### Docker (recommended)
+
+```bash
+git clone https://github.com/robinsanjeev/football-betting-intel.git
+cd football-betting-intel
+cp config/config.yaml.example config/config.yaml
+# Edit config.yaml with your API keys
+docker compose up -d
+```
+
+Open `http://localhost:8080`
+
+### Manual
+
+```bash
+# Prerequisites: Python 3.11+, Node 20+
+
+# Backend
+pip install -r requirements.txt
+
+# Frontend
+cd web && npm install && npm run build && cd ..
+
+# Configure
+cp config/config.yaml.example config/config.yaml
+# Edit config.yaml with your API keys
+
+# Run
+uvicorn football_intel.api.main:app --host 0.0.0.0 --port 8000
+```
+
+Open `http://localhost:8000`
+
+---
+
+## API Keys Required
+
+| Service | Purpose | Cost | Link |
+|---|---|---|---|
+| football-data.org | Historical match results | Free (10 req/min) | [Sign up](https://www.football-data.org/) |
+| Kalshi | Live prediction market prices | Free account | [Sign up](https://kalshi.com/) |
+| The Odds API | Bookmaker odds (optional) | Free (500 req/month) | [Sign up](https://the-odds-api.com/) |
+| Telegram Bot | Signal alerts (optional) | Free | [BotFather](https://core.telegram.org/bots#creating-a-new-bot) |
 
 ---
 
@@ -101,203 +143,80 @@ A quantitative football (soccer) betting system that identifies positive expecte
 
 ```
 football_intel/
-├── api/                    # FastAPI backend
-│   ├── main.py             # App entry point, all API routes
-│   ├── models.py           # Pydantic response schemas
-│   └── cache.py            # In-memory signal cache (15-min TTL)
-├── common/                 # Shared utilities
-│   ├── config.py           # YAML config loader
-│   └── logging_utils.py    # Structured logging
-├── config/
-│   ├── config.yaml         # Your config (git-ignored)
-│   ├── config.yaml.example # Template with placeholder keys
-│   └── keys/               # API private keys (git-ignored)
-├── dashboard/              # Legacy Streamlit dashboard
-│   ├── app.py
-│   └── style.css
-├── delivery/
-│   └── telegram_bot.py     # Telegram alert sender
-├── ingestion/              # Data source clients
-│   ├── adapters.py         # Unified match data adapter
-│   ├── cache.py            # Response caching
-│   ├── football_data.py    # football-data.org API client
-│   ├── kalshi.py           # Kalshi base client (RSA auth)
-│   ├── kalshi_soccer.py    # Soccer-specific Kalshi markets
-│   ├── kalshi_futures.py   # Season futures markets
-│   └── odds_api.py         # The Odds API client
-├── models/                 # Prediction models
-│   ├── calibrated_poisson.py  # Main model (per-team strengths)
-│   ├── poisson.py          # Naive Poisson baseline
-│   ├── historical_data.py  # Historical data fetcher + cache
-│   ├── hybrid_model.py     # Ensemble/hybrid model
-│   └── futures_model.py    # Season futures evaluation
-├── scripts/                # CLI runners
-│   ├── run_pipeline.py     # Full dual-track pipeline
-│   ├── run_signals.py      # Signal generation only
-│   ├── kalshi_recon.py     # Market reconnaissance
-│   ├── settle_trades.py    # Trade settlement
-│   └── demo_flow.py        # Demo walkthrough
-├── strategy/               # Betting strategy logic
-│   ├── ev.py               # Expected value calculations
-│   ├── signal_generator.py # EV signal generator
-│   └── sentiment.py        # Crowd vs. model analysis
-├── tracking/
-│   └── ledger.py           # SQLite paper trade ledger
-├── web/                    # React frontend
-│   ├── src/
-│   │   ├── pages/          # Dashboard pages
-│   │   ├── components/     # Reusable UI components
-│   │   ├── api.ts          # API client
-│   │   └── types.ts        # TypeScript types
-│   ├── package.json
-│   ├── tailwind.config.js
-│   └── vite.config.ts
-├── Dockerfile              # Multi-stage build (frontend + API)
-├── docker-compose.yml      # One-command deployment
-├── requirements.txt        # Python dependencies
-└── .gitignore
+├── api/                       # FastAPI backend
+│   ├── main.py                # All API routes + static file serving
+│   ├── models.py              # Pydantic response schemas
+│   └── cache.py               # Signal cache (15-min TTL)
+├── models/                    # Prediction models
+│   ├── calibrated_poisson.py  # Main model (Dixon-Coles + recency)
+│   ├── historical_data.py     # Historical data fetcher + cache
+│   └── poisson.py             # Naive Poisson baseline
+├── strategy/                  # Betting logic
+│   ├── signal_generator.py    # Edge detection + market shrinkage
+│   ├── adaptive.py            # Feedback loop + auto-tuning
+│   └── ev.py                  # Expected value calculations
+├── ingestion/                 # Data source clients
+│   ├── kalshi_soccer.py       # Kalshi soccer markets
+│   ├── football_data.py       # football-data.org client
+│   └── odds_api.py            # The Odds API client
+├── scripts/                   # CLI tools
+│   ├── run_pipeline.py        # Full pipeline → signals + alerts
+│   ├── settle_trades.py       # Settle pending trades + trigger adaptive loop
+│   └── run_signals.py         # Signal generation only
+├── web/                       # React + Vite + Tailwind frontend
+│   └── src/pages/             # Dashboard tabs
+├── config/                    # YAML config (git-ignored)
+├── Dockerfile                 # Multi-stage build
+├── docker-compose.yml         # One-command deployment
+└── requirements.txt           # Python dependencies
 ```
-
----
-
-## Installation
-
-### Prerequisites
-- Python 3.11+
-- Node.js 20+ (for the web dashboard)
-- API keys for:
-  - [football-data.org](https://www.football-data.org/) (free tier available)
-  - [The Odds API](https://the-odds-api.com/) (free tier: 500 requests/month)
-  - [Kalshi](https://kalshi.com/) (requires account + RSA key pair)
-  - A [Telegram bot token](https://core.telegram.org/bots#creating-a-new-bot)
-
-### 1. Clone the repo
-
-```bash
-git clone https://github.com/robinsanjeev/football-betting-intel.git
-cd football-betting-intel
-```
-
-### 2. Set up Python environment
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 3. Configure
-
-```bash
-cp config/config.yaml.example config/config.yaml
-```
-
-Edit `config/config.yaml` and fill in your API keys:
-
-```yaml
-football_data:
-  api_key: YOUR_FOOTBALL_DATA_API_KEY
-
-kalshi:
-  key_id: YOUR_KALSHI_KEY_ID
-  private_key_path: config/keys/kalshi.key
-
-telegram:
-  bot_token: YOUR_TELEGRAM_BOT_TOKEN
-  chat_id: 'YOUR_TELEGRAM_CHAT_ID'
-
-odds_api:
-  api_key: YOUR_ODDS_API_KEY
-```
-
-For Kalshi, place your RSA private key at `config/keys/kalshi.key`.
-
-### 4. Install the web dashboard
-
-```bash
-cd web
-npm install
-cd ..
-```
-
-### 5. Run
-
-**Option A: Run the pipeline (generates signals + sends Telegram alerts)**
-```bash
-# From the parent directory of football_intel/
-python3 -m football_intel.scripts.run_pipeline
-```
-
-**Option B: Start the API server + dashboard**
-```bash
-# Terminal 1: API
-uvicorn football_intel.api.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Terminal 2: Frontend dev server
-cd web && npm run dev
-```
-
-Then open `http://localhost:5173` for the dashboard.
-
-**Option C: Docker (production)**
-```bash
-docker compose up -d
-```
-
-Dashboard available at `http://localhost:8080`.
 
 ---
 
 ## Scripts
 
-| Script | Description |
-|---|---|
-| `run_pipeline.py` | Full dual-track pipeline: match EV signals + futures analysis → Telegram alerts + ledger |
-| `run_signals.py` | Signal generation only (no alerts, just stdout) |
-| `kalshi_recon.py` | Reconnaissance: fetches all open Kalshi soccer events and classifies bet types |
-| `settle_trades.py` | Settles pending paper trades against actual match results |
-| `demo_flow.py` | Interactive demo walkthrough of the system |
-
-Run any script with:
 ```bash
-python3 -m football_intel.scripts.<script_name>
-```
+# Run full pipeline (signals + Telegram alerts + paper trades)
+python3 -m football_intel.scripts.run_pipeline
 
----
+# Generate signals only (stdout)
+python3 -m football_intel.scripts.run_signals
+
+# Settle pending trades (checks Kalshi for results)
+python3 -m football_intel.scripts.settle_trades
+
+# Dry run settlement (no DB changes)
+python3 -m football_intel.scripts.settle_trades --dry-run
+```
 
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/health` | GET | Health check |
-| `/api/signals` | GET | Active betting signals |
-| `/api/trades` | GET | Paper trade history |
-| `/api/performance` | GET | ROI, win rate, drawdown, P&L charts |
-| `/api/accuracy` | GET | Model calibration and accuracy metrics |
-| `/api/insights/{match}` | GET | Detailed model breakdown for a specific match |
+| `/api/signals/active` | GET | Current betting signals |
+| `/api/signals/history` | GET | Historical signal archive |
+| `/api/trades` | GET | Paper trade ledger |
+| `/api/performance` | GET | Win rate, ROI, PnL, drawdown |
+| `/api/accuracy` | GET | Model calibration metrics |
+| `/api/model-insights` | GET | Per-match model breakdowns |
+| `/api/adaptive` | GET | Feedback loop analysis + params |
+| `/api/adaptive/retune` | POST | Trigger manual parameter retune |
 
 ---
 
-## How the Model Works
+## NAS Deployment
 
-### Calibrated Poisson
+### Synology
+Container Manager → Project → Upload `docker-compose.yml` → Build & Run
 
-The core model estimates **per-team attack and defense strengths** from historical match results:
+### QNAP
+Container Station → Create Application → Paste docker-compose contents
 
-1. **Data collection**: Fetches last 12 months of results from football-data.org across all tracked leagues
-2. **Strength estimation**: For each team, calculates attack strength (goals scored vs. league average) and defense strength (goals conceded vs. league average)
-3. **Lambda prediction**: For a given matchup, computes expected goals (λ) for each team using: `λ_home = avg_goals × home_attack × away_defense × home_advantage`
-4. **Probability grid**: Uses Poisson distribution to build a full scoreline probability matrix (0-0 through 6-6)
-5. **Market mapping**: Derives probabilities for all market types (1X2, over/under, BTTS, spreads, first-half) from the scoreline grid
+### Unraid
+Community Applications → Docker Compose → point to `docker-compose.yml`
 
-### EV Calculation
-
-For each Kalshi market:
-```
-EV = model_probability - kalshi_implied_probability
-```
-
-A signal is emitted when `EV > min_edge` (default: 5%).
+**Persistent data:** The compose file mounts `config/` and `data/` as volumes so your settings and trade history survive container restarts.
 
 ---
 

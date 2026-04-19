@@ -79,6 +79,7 @@ export default function PerformanceAccuracy() {
 
   // Table state
   const [resultFilter, setResultFilter] = useState<ResultFilter>('ALL')
+  const [hidePending, setHidePending] = useState(true)  // default: show only settled
   const [sortKey, setSortKey] = useState<SortKey>('timestamp')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
@@ -142,9 +143,46 @@ export default function PerformanceAccuracy() {
     })
   }, [signalHistory])
 
+  // Settled-only stats for KPI cards
+  const settledTrades = useMemo(() =>
+    enrichedTrades.filter((t) => t.result === 'WIN' || t.result === 'LOSE'),
+    [enrichedTrades]
+  )
+
+  const settledStats = useMemo(() => {
+    const wins = settledTrades.filter((t) => t.result === 'WIN').length
+    const losses = settledTrades.filter((t) => t.result === 'LOSE').length
+    const total = wins + losses
+    const winRate = total > 0 ? wins / total : 0
+    const totalPnl = settledTrades.reduce((sum, t) => {
+      if (t.result === 'WIN') return sum + t.stake * (t.odds - 1)
+      return sum - t.stake
+    }, 0)
+    const totalStaked = total * 10
+    const roi = totalStaked > 0 ? totalPnl / totalStaked : 0
+
+    // Max drawdown from cumulative PnL
+    let peak = 0
+    let maxDd = 0
+    let cumPnl = 0
+    const sorted = [...settledTrades].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    for (const t of sorted) {
+      cumPnl += t.result === 'WIN' ? t.stake * (t.odds - 1) : -t.stake
+      if (cumPnl > peak) peak = cumPnl
+      const dd = peak - cumPnl
+      if (dd > maxDd) maxDd = dd
+    }
+
+    // Avg edge of settled trades
+    const avgEdge = total > 0 ? settledTrades.reduce((s, t) => s + t.edge, 0) / total : 0
+
+    return { wins, losses, total, winRate, totalPnl, totalStaked, roi, maxDrawdown: maxDd, avgEdge }
+  }, [settledTrades])
+
   // Filter and sort
   const filteredTrades = useMemo(() => {
     let result = [...enrichedTrades]
+    if (hidePending) result = result.filter((t) => t.result !== 'PENDING')
     if (resultFilter !== 'ALL') result = result.filter((t) => t.result === resultFilter)
 
     result.sort((a, b) => {
@@ -236,49 +274,60 @@ export default function PerformanceAccuracy() {
 
       {!loading && !error && perfData && (
         <>
-          {/* ── KPI Row ── */}
+          {/* ── Settled-only banner ── */}
+          {settledStats.total === 0 && (
+            <div className="card p-4 mb-6 flex items-center gap-3 border-[#f5a623]/20 bg-[#f5a623]/[0.04]">
+              <AlertCircle size={16} className="text-[#f5a623] shrink-0" />
+              <p className="text-xs text-[#a0a0c0]">
+                No settled trades yet. Performance metrics will populate as matches complete and trades are settled.
+                Currently tracking <span className="text-[#e2e2f0] font-medium">{enrichedTrades.length}</span> pending signals.
+              </p>
+            </div>
+          )}
+
+          {/* ── KPI Row (settled only) ── */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
             <MetricCard
-              label="Total Trades"
-              value={perfData.total_trades}
-              subValue={`${perfData.settled_trades} settled`}
+              label="Settled Trades"
+              value={settledStats.total}
+              subValue={`${enrichedTrades.length} total signals`}
               icon={<BarChart2 size={14} />}
               trend="neutral"
               valueColor="text-[#e2e2f0]"
             />
             <MetricCard
               label="Win Rate"
-              value={perfData.settled_trades > 0 ? `${(perfData.win_rate * 100).toFixed(1)}%` : '—'}
-              subValue={perfData.settled_trades > 0 ? `${perfData.win_loss_counts.WIN}W / ${perfData.win_loss_counts.LOSE}L` : 'No settled'}
+              value={settledStats.total > 0 ? `${(settledStats.winRate * 100).toFixed(1)}%` : '—'}
+              subValue={settledStats.total > 0 ? `${settledStats.wins}W / ${settledStats.losses}L` : 'No settled'}
               icon={<TrendingUp size={14} />}
-              trend={perfData.win_rate >= 0.5 ? 'positive' : perfData.win_rate > 0 ? 'negative' : 'neutral'}
+              trend={settledStats.winRate >= 0.5 ? 'positive' : settledStats.winRate > 0 ? 'negative' : 'neutral'}
             />
             <MetricCard
               label="ROI"
-              value={perfData.settled_trades > 0 ? `${(perfData.roi * 100).toFixed(1)}%` : '—'}
-              subValue={`$${perfData.total_staked.toFixed(0)} staked`}
+              value={settledStats.total > 0 ? `${(settledStats.roi * 100).toFixed(1)}%` : '—'}
+              subValue={settledStats.totalStaked > 0 ? `$${settledStats.totalStaked.toFixed(0)} staked` : ''}
               icon={<TrendingUp size={14} />}
-              trend={perfData.roi > 0 ? 'positive' : perfData.roi < 0 ? 'negative' : 'neutral'}
+              trend={settledStats.roi > 0 ? 'positive' : settledStats.roi < 0 ? 'negative' : 'neutral'}
             />
             <MetricCard
-              label="Total PnL"
-              value={perfData.total_pnl !== 0 ? `${perfData.total_pnl >= 0 ? '+' : ''}$${perfData.total_pnl.toFixed(2)}` : '$0'}
+              label="Cumulative PnL"
+              value={settledStats.total > 0 ? `${settledStats.totalPnl >= 0 ? '+' : ''}$${settledStats.totalPnl.toFixed(2)}` : '$0'}
               icon={<DollarSign size={14} />}
-              trend={perfData.total_pnl > 0 ? 'positive' : perfData.total_pnl < 0 ? 'negative' : 'neutral'}
+              trend={settledStats.totalPnl > 0 ? 'positive' : settledStats.totalPnl < 0 ? 'negative' : 'neutral'}
             />
             <MetricCard
               label="Max Drawdown"
-              value={perfData.max_drawdown !== 0 ? `-$${Math.abs(perfData.max_drawdown).toFixed(2)}` : '$0'}
+              value={settledStats.total > 0 ? `-$${settledStats.maxDrawdown.toFixed(2)}` : '$0'}
               icon={<TrendingDown size={14} />}
-              trend={perfData.max_drawdown < -5 ? 'negative' : 'neutral'}
+              trend={settledStats.maxDrawdown > 5 ? 'negative' : 'neutral'}
               valueColor="text-[#e84040]"
             />
             <MetricCard
-              label="Hypothetical PnL"
-              value={`${hypotheticalTotal >= 0 ? '+' : ''}$${hypotheticalTotal.toFixed(2)}`}
-              subValue="if followed model"
+              label="Avg Edge"
+              value={settledStats.total > 0 ? `${(settledStats.avgEdge * 100).toFixed(1)}%` : '—'}
+              subValue="on settled trades"
               icon={<Activity size={14} />}
-              trend={hypotheticalTotal > 0 ? 'positive' : hypotheticalTotal < 0 ? 'negative' : 'neutral'}
+              trend={settledStats.avgEdge > 0.08 ? 'positive' : 'neutral'}
             />
           </div>
 
@@ -322,9 +371,9 @@ export default function PerformanceAccuracy() {
           <div className="mt-8">
             <div className="flex items-start justify-between gap-4 mb-4">
               <div>
-                <h2 className="text-base font-semibold text-[#e2e2f0]">Detailed Results</h2>
+                <h2 className="text-base font-semibold text-[#e2e2f0]">Settled Results</h2>
                 <p className="text-[11px] text-[#6b6b8a] mt-0.5">
-                  Match predictions, recommendations, outcomes, and hypothetical returns
+                  Only settled trades are shown — these reflect actual model performance
                 </p>
               </div>
               <button
@@ -338,14 +387,26 @@ export default function PerformanceAccuracy() {
 
             {/* Filters */}
             <div className="flex flex-wrap gap-1.5 mb-4">
-              {(['ALL', 'WIN', 'LOSE', 'PENDING'] as ResultFilter[]).map((f) => (
+              <FilterButton
+                label={hidePending ? 'Settled Only' : 'All Signals'}
+                active={hidePending}
+                onClick={() => setHidePending(!hidePending)}
+              />
+              {(['ALL', 'WIN', 'LOSE'] as ResultFilter[]).map((f) => (
                 <FilterButton
                   key={f}
-                  label={f === 'ALL' ? `All (${enrichedTrades.length})` : `${f} (${enrichedTrades.filter((t) => t.result === f).length})`}
+                  label={f === 'ALL' ? `All (${settledTrades.length})` : `${f} (${settledTrades.filter((t) => t.result === f).length})`}
                   active={resultFilter === f}
                   onClick={() => setResultFilter(f)}
                 />
               ))}
+              {!hidePending && (
+                <FilterButton
+                  label={`PENDING (${enrichedTrades.filter((t) => t.result === 'PENDING').length})`}
+                  active={resultFilter === 'PENDING'}
+                  onClick={() => setResultFilter('PENDING')}
+                />
+              )}
             </div>
 
             {/* Table */}
