@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import ActiveSignals from './pages/ActiveSignals'
 import PerformanceAccuracy from './pages/PerformanceAccuracy'
-import TradeLog from './pages/TradeLog'
+// import TradeLog from './pages/TradeLog'  // Hidden for now — may use for actual vs paper trades
 import Documentation from './pages/Documentation'
 import ModelInsights from './pages/ModelInsights'
 import AdaptiveTuning from './pages/AdaptiveTuning'
@@ -14,7 +14,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<ActiveSignals />} />
           <Route path="/performance" element={<PerformanceAccuracy />} />
-          <Route path="/trades" element={<TradeLog />} />
+          {/* <Route path="/trades" element={<TradeLog />} /> */}  {/* Hidden — may use for actual vs paper trades */}
           <Route path="/insights" element={<ModelInsights />} />
           <Route path="/tuning" element={<AdaptiveTuning />} />
           <Route path="/docs" element={<Documentation />} />
