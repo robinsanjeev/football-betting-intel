@@ -14,11 +14,13 @@ EV per dollar formula (for a Kalshi Yes contract at price P):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 from football_intel.common.logging_utils import get_logger
 from football_intel.ingestion.kalshi_soccer import SoccerMarket, SoccerMatch
 from football_intel.models.calibrated_poisson import CalibratedPoissonModel, MatchPrediction
+# Adaptive params — imported lazily to avoid circular imports at module load time
+# The actual import happens inside __init__ and reload_adaptive_params
 
 logger = get_logger(__name__)
 
@@ -220,9 +222,30 @@ class SignalGenerator:
 
     def __init__(self, model: CalibratedPoissonModel) -> None:
         self.model = model
+        self._adaptive_params = None
+        self.reload_adaptive_params()
 
-    @staticmethod
+    def reload_adaptive_params(self) -> None:
+        """Load (or reload) adaptive parameters from the JSON store.
+
+        Safe to call at any time — falls back to None (hardcoded defaults)
+        if the file is missing or corrupt.
+        """
+        try:
+            from football_intel.strategy.adaptive import AdaptiveAnalyzer
+            analyzer = AdaptiveAnalyzer()
+            self._adaptive_params = analyzer.load_params()
+            logger.debug(
+                "Loaded adaptive params v%d (sample_size=%d)",
+                self._adaptive_params.version,
+                self._adaptive_params.sample_size,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not load adaptive params: %s — using hardcoded defaults", exc)
+            self._adaptive_params = None
+
     def _shrink_toward_market(
+        self,
         model_prob: float,
         market_prob: float,
         confidence: str,
@@ -232,7 +255,7 @@ class SignalGenerator:
         When the model diverges from an efficient market, the market is often
         incorporating information the model doesn't have.  We trust our model
         more when we have lots of historical data (HIGH) and less when we
-        don't (LOW).
+        don't (LOW).  Alpha values are loaded from adaptive params when available.
 
         Args:
             model_prob:  Raw model probability.
@@ -242,8 +265,12 @@ class SignalGenerator:
         Returns:
             Adjusted probability blended toward market.
         """
-        alpha_map = {"HIGH": 0.7, "MEDIUM": 0.5, "LOW": 0.3}
-        alpha = alpha_map.get(confidence, 0.5)
+        # Prefer adaptive alpha if available
+        if self._adaptive_params is not None:
+            alpha = self._adaptive_params.shrinkage_alpha_by_conf.get(confidence, 0.5)
+        else:
+            alpha_map = {"HIGH": 0.7, "MEDIUM": 0.5, "LOW": 0.3}
+            alpha = alpha_map.get(confidence, 0.5)
         return alpha * model_prob + (1.0 - alpha) * market_prob
 
     # ------------------------------------------------------------------
@@ -260,14 +287,23 @@ class SignalGenerator:
         Args:
             matches: List of SoccerMatch objects from KalshiSoccerClient.
             min_edge: Minimum edge (model_prob - kalshi_implied_prob) required
-                      to emit a signal. Default 0.08 = 8% (raised from 5% to
-                      filter out marginal noise).
+                      to emit a signal. Used as a fallback when adaptive params
+                      are not available or do not specify a type-specific threshold.
+                      Default 0.08 = 8%.
 
         Returns:
             List of BettingSignal objects where edge > min_edge, sorted by
             ev_per_dollar descending.
         """
         all_signals: List[BettingSignal] = []
+
+        # Determine which confidence levels are allowed
+        if self._adaptive_params is not None:
+            allowed_confidence = set(self._adaptive_params.enabled_confidence)
+            allowed_bet_types = set(self._adaptive_params.enabled_bet_types)
+        else:
+            allowed_confidence = {"HIGH", "MEDIUM", "LOW"}
+            allowed_bet_types = {"MONEYLINE", "OVER_UNDER", "BTTS", "SPREAD", "FIRST_HALF"}
 
         for match in matches:
             try:
@@ -279,7 +315,11 @@ class SignalGenerator:
                 )
                 continue
 
-            signals = self._match_prediction_to_signals(match, prediction, min_edge)
+            signals = self._match_prediction_to_signals(
+                match, prediction, min_edge,
+                allowed_confidence=allowed_confidence,
+                allowed_bet_types=allowed_bet_types,
+            )
             all_signals.extend(signals)
 
         # Sort by EV descending
@@ -339,6 +379,16 @@ class SignalGenerator:
                 f"vs market {signal.kalshi_implied_prob:.0%}."
             )
 
+        # ── Win probability context ──────────────────────────────────
+        if signal.model_prob >= 0.60:
+            parts.append(f"Win likelihood: {signal.model_prob:.0%} — strong favourite.")
+        elif signal.model_prob >= 0.40:
+            parts.append(f"Win likelihood: {signal.model_prob:.0%} — competitive odds.")
+        elif signal.model_prob >= 0.25:
+            parts.append(f"Win likelihood: {signal.model_prob:.0%} — moderate risk.")
+        else:
+            parts.append(f"Win likelihood: {signal.model_prob:.0%} — higher risk, bet small.")
+
         # ── Edge commentary ────────────────────────────────────────────
         # Note: signal.edge is already capped at _MAX_EDGE
         raw_edge = signal.model_prob - signal.kalshi_implied_prob
@@ -366,25 +416,41 @@ class SignalGenerator:
         match: SoccerMatch,
         prediction: MatchPrediction,
         min_edge: float,
+        allowed_confidence: Optional[set] = None,
+        allowed_bet_types: Optional[set] = None,
     ) -> List[BettingSignal]:
         """For a single match, compare each Kalshi market to the model.
 
         Args:
             match: SoccerMatch with all its markets.
             prediction: The model's MatchPrediction for this fixture.
-            min_edge: Minimum edge threshold.
+            min_edge: Minimum edge threshold (used as fallback).
+            allowed_confidence: Set of confidence levels to include.
+            allowed_bet_types: Set of bet types to include.
 
         Returns:
             List of BettingSignal objects for this match.
         """
+        if allowed_confidence is None:
+            allowed_confidence = {"HIGH", "MEDIUM", "LOW"}
+        if allowed_bet_types is None:
+            allowed_bet_types = {"MONEYLINE", "OVER_UNDER", "BTTS", "SPREAD", "FIRST_HALF"}
         signals: List[BettingSignal] = []
         match_title = f"{match.home_team} vs {match.away_team}"
         conf = _confidence(prediction.home_team_matches, prediction.away_team_matches)
         suggested_fraction = self._SIZING.get(conf, 0.5)
 
+        # Skip if confidence level is disabled by adaptive params
+        if conf not in allowed_confidence:
+            return signals
+
         for market in match.markets:
             # Skip markets with no Kalshi price
             if market.implied_prob_yes is None or market.implied_prob_yes <= 0:
+                continue
+
+            # Skip disabled bet types
+            if market.bet_type not in allowed_bet_types:
                 continue
 
             result = _get_model_prob_for_market(market, prediction)
@@ -399,15 +465,35 @@ class SignalGenerator:
 
             edge = model_prob - kalshi_p
 
-            if edge <= min_edge:
+            # ── Per-type min_edge from adaptive params (fallback to arg) ─
+            if self._adaptive_params is not None:
+                effective_min_edge = self._adaptive_params.min_edge_by_type.get(
+                    market.bet_type, min_edge
+                )
+            else:
+                effective_min_edge = min_edge
+
+            if edge <= effective_min_edge:
+                continue
+
+            # ── Minimum win probability filter (adaptive or hardcoded) ──
+            if self._adaptive_params is not None:
+                min_prob = self._adaptive_params.min_prob_by_type.get(
+                    market.bet_type, 0.15
+                )
+            else:
+                min_prob = 0.15
+
+            if model_prob < min_prob:
                 continue
 
             # ── Edge cap (25%) ─────────────────────────────────────────
             edge_capped = min(edge, self._MAX_EDGE)
 
-            # EV per $1 on the Yes contract
-            # Buying Yes at price P: profit if correct = (1-P), loss if wrong = P
-            ev_per_dollar = model_prob - kalshi_p  # = model_prob*(1-P) - (1-model_prob)*P simplified
+            # EV per $1 on the Yes contract (probability-adjusted)
+            # Buy Yes at price P: win → profit (1-P), lose → lose P
+            # EV = model_prob * (1-P) - (1-model_prob) * P
+            ev_per_dollar = model_prob * (1.0 - kalshi_p) - (1.0 - model_prob) * kalshi_p
 
             # Build Kalshi URL
             event_ticker = match.event_ticker

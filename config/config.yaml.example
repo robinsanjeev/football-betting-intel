@@ -1,33 +1,47 @@
+# football_intel/config/config.yaml.example
+# Copy to config.yaml and fill in your real credentials.
+
 football_data:
-  api_key: YOUR_FOOTBALL_DATA_API_KEY
-  base_url: https://api.football-data.org/v4
+  api_key: "YOUR_FOOTBALL_DATA_API_KEY"
+  base_url: "https://api.football-data.org/v4"
   leagues:
-  - ALL
+    - ALL     # Fetch all free-tier (TIER_ONE) football competitions
+    # Or specify explicit league codes instead, e.g.:
+    # - PL      # Premier League
+    # - PD      # La Liga
+    # - BL1     # Bundesliga
+    # - SA      # Serie A
+    # - FL1     # Ligue 1
+
 kalshi:
-  base_url: https://api.elections.kalshi.com/trade-api/v2
-  ws_url: wss://api.elections.kalshi.com/trade-api/ws/v2
-  football_markets_prefix: FOOTBALL
-  key_id: YOUR_KALSHI_KEY_ID
-  private_key_path: config/keys/kalshi.key
+  key_id: "YOUR_KALSHI_KEY_ID"                          # UUID from Kalshi API Keys page
+  private_key_path: "/path/to/kalshi-key.key"            # RSA private key (.key file)
+  base_url: "https://demo-api.kalshi.co/trade-api/v2"   # Demo env; prod = https://api.elections.kalshi.com/trade-api/v2
+  ws_url: "wss://demo-api.kalshi.co/trade-api/ws/v2"
+  football_markets_prefix: "FOOTBALL"                    # Adjust to match actual Kalshi tickers
+
 telegram:
-  bot_token: YOUR_TELEGRAM_BOT_TOKEN
-  chat_id: 'YOUR_TELEGRAM_CHAT_ID'
-storage:
-  db_path: football_intel/data/football_intel.db
-  cache_ttl_hours: 6
-logging:
-  level: INFO
-  log_file: football_intel/logs/system.log
+  bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
+  chat_id: "YOUR_TELEGRAM_CHAT_ID"  # betting group chat id
+
 odds_api:
-  api_key: YOUR_FOOTBALL_DATA_API_KEY
-  base_url: https://api.the-odds-api.com/v4
-  regions: uk,eu
-  markets: h2h
-  sports:
-  - soccer_epl
-  - soccer_spain_la_liga
-  - soccer_germany_bundesliga
-  - soccer_italy_serie_a
-  - soccer_france_ligue_one
-  - soccer_uefa_champs_league
-  - soccer_usa_mls
+  api_key: "YOUR_ODDS_API_KEY"              # Free tier: 500 req/month from https://the-odds-api.com
+  base_url: "https://api.the-odds-api.com/v4"
+  regions: "uk,eu"                            # Bookmaker regions (uk, eu, us, au)
+  markets: "h2h"                              # h2h = moneyline/1X2
+  sports:                                      # Soccer sport keys
+    - soccer_epl
+    - soccer_spain_la_liga
+    - soccer_germany_bundesliga
+    - soccer_italy_serie_a
+    - soccer_france_ligue_one
+    - soccer_uefa_champs_league
+    - soccer_usa_mls
+
+storage:
+  db_path: "football_intel/data/football_intel.db"
+  cache_ttl_hours: 6
+
+logging:
+  level: "INFO"
+  log_file: "football_intel/logs/system.log"

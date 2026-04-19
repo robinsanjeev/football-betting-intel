@@ -223,3 +223,70 @@ class MatchInsightResponse(BaseModel):
 
 class ModelInsightsResponse(BaseModel):
     matches: List[MatchInsightResponse]
+
+
+# ---------------------------------------------------------------------------
+# Adaptive Tuning
+# ---------------------------------------------------------------------------
+
+class GroupStats(BaseModel):
+    """Performance stats for a given grouping (bet_type, edge range, etc.)."""
+    count: int
+    wins: int
+    win_rate: float
+    total_pnl: float
+    total_staked: float
+    roi: float
+    avg_edge: float
+    avg_model_prob: float
+    calibration_error: float
+
+
+class CalibrationPoint(BaseModel):
+    """Predicted vs actual win rate for a probability bucket."""
+    bucket: str               # e.g. "30-45%"
+    predicted_midpoint: float
+    actual_win_rate: Optional[float]
+    count: int
+    calibration_error: Optional[float]
+
+
+class AdaptiveParamsResponse(BaseModel):
+    """Current adaptive parameters (mirrors AdaptiveParams dataclass)."""
+    min_edge_by_type: Dict[str, float]
+    min_prob_by_type: Dict[str, float]
+    shrinkage_alpha_by_conf: Dict[str, float]
+    max_edge: float
+    enabled_bet_types: List[str]
+    enabled_confidence: List[str]
+    updated_at: str
+    sample_size: int
+    version: int
+
+
+class AdaptiveReportResponse(BaseModel):
+    """Full adaptive tuning report returned by GET /api/adaptive."""
+    status: str                           # "ACTIVE" or "WARMING_UP"
+    total_settled: int
+    samples_needed: int
+    min_samples: int
+    current_params: AdaptiveParamsResponse
+    default_params: AdaptiveParamsResponse
+    edge_deltas: Dict[str, float]         # bet_type → delta from default
+    alpha_deltas: Dict[str, float]        # confidence → delta from default
+    by_bet_type: Dict[str, GroupStats]
+    by_edge_bucket: Dict[str, GroupStats]
+    by_prob_bucket: Dict[str, GroupStats]
+    by_confidence: Dict[str, GroupStats]
+    calibration: List[CalibrationPoint]
+    last_updated: str
+    version: int
+
+
+class RetuneResponse(BaseModel):
+    """Response from POST /api/adaptive/retune."""
+    success: bool
+    message: str
+    new_params: Optional[AdaptiveParamsResponse] = None
+    total_settled: int
+    version: int

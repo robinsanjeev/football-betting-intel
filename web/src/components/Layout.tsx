@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Zap, TrendingUp, FileText, BookOpen, Microscope } from 'lucide-react'
+import { Zap, TrendingUp, FileText, BookOpen, Microscope, Sliders } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 const navItems = [
@@ -7,6 +7,7 @@ const navItems = [
   { to: '/performance', icon: TrendingUp, label: 'Performance', end: false },
   { to: '/trades', icon: FileText, label: 'Trade Log', end: false },
   { to: '/insights', icon: Microscope, label: 'Model Insights', end: false },
+  { to: '/tuning', icon: Sliders, label: 'Tuning', end: false },
   { to: '/docs', icon: BookOpen, label: 'Docs', end: false },
 ]
 

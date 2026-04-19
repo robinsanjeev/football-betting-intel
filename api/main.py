@@ -22,16 +22,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from football_intel.api.cache import SignalCache
 from football_intel.api.models import (
     AccuracyResponse,
+    AdaptiveParamsResponse,
+    AdaptiveReportResponse,
     CalibrationBucket,
+    CalibrationPoint,
     CumulativePnLPoint,
     FirstHalfProbs,
     GoalDistributionEntry,
+    GroupStats,
     HealthResponse,
     MatchInsightResponse,
     ModelInsightsResponse,
     PerformanceResponse,
     Prob1X2,
     ProbOverUnder,
+    RetuneResponse,
     RollingWinRatePoint,
     ScorelineEntry,
     SignalResponse,
@@ -328,7 +333,9 @@ def _run_pipeline() -> tuple[List[Dict[str, Any]], int]:
     for i, sig in enumerate(signals, start=1):
         entry_cents = int(round(sig.kalshi_implied_prob * 100))
         upside_cents = 100 - entry_cents
-        score = int(min(sig.edge * 200, 100))
+        # Score = probability-adjusted: edge * model confidence * 100
+        # High-prob + high-edge = high score; low-prob longshots score lower
+        score = int(min(sig.edge * sig.model_prob * 400, 100))
 
         # Resolve team crests from match_title ("Home vs Away")
         parts = sig.match_title.split(" vs ")
@@ -945,7 +952,7 @@ def model_insights() -> ModelInsightsResponse:
                         "kalshi_url": sig.kalshi_url,
                         "entry_cents": entry_cents,
                         "upside_cents": 100 - entry_cents,
-                        "score": int(min(sig.edge * 200, 100)),
+                        "score": int(min(sig.edge * sig.model_prob * 400, 100)),
                     })
 
                 match_insights.append(
@@ -1010,6 +1017,103 @@ def model_insights() -> ModelInsightsResponse:
         raise HTTPException(
             status_code=503,
             detail=f"Model insights pipeline error: {exc}",
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Adaptive Tuning endpoints
+# ---------------------------------------------------------------------------
+
+
+def _build_adaptive_params_response(params_dict: dict) -> AdaptiveParamsResponse:
+    return AdaptiveParamsResponse(
+        min_edge_by_type=params_dict["min_edge_by_type"],
+        min_prob_by_type=params_dict["min_prob_by_type"],
+        shrinkage_alpha_by_conf=params_dict["shrinkage_alpha_by_conf"],
+        max_edge=params_dict["max_edge"],
+        enabled_bet_types=params_dict["enabled_bet_types"],
+        enabled_confidence=params_dict["enabled_confidence"],
+        updated_at=params_dict["updated_at"],
+        sample_size=params_dict["sample_size"],
+        version=params_dict["version"],
+    )
+
+
+@app.get("/api/adaptive", response_model=AdaptiveReportResponse)
+def adaptive_report() -> AdaptiveReportResponse:
+    """Return current adaptive tuning params and performance analysis."""
+    try:
+        from football_intel.strategy.adaptive import AdaptiveAnalyzer
+        analyzer = AdaptiveAnalyzer()
+        report = analyzer.get_analysis_report()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Adaptive analysis error: {exc}",
+        ) from exc
+
+    def _gs(d: dict) -> GroupStats:
+        return GroupStats(**d)
+
+    return AdaptiveReportResponse(
+        status=report["status"],
+        total_settled=report["total_settled"],
+        samples_needed=report["samples_needed"],
+        min_samples=report["min_samples"],
+        current_params=_build_adaptive_params_response(report["current_params"]),
+        default_params=_build_adaptive_params_response(report["default_params"]),
+        edge_deltas=report["edge_deltas"],
+        alpha_deltas=report["alpha_deltas"],
+        by_bet_type={k: _gs(v) for k, v in report["by_bet_type"].items()},
+        by_edge_bucket={k: _gs(v) for k, v in report["by_edge_bucket"].items()},
+        by_prob_bucket={k: _gs(v) for k, v in report["by_prob_bucket"].items()},
+        by_confidence={k: _gs(v) for k, v in report["by_confidence"].items()},
+        calibration=[
+            CalibrationPoint(**c) for c in report["calibration"]
+        ],
+        last_updated=report["last_updated"],
+        version=report["version"],
+    )
+
+
+@app.post("/api/adaptive/retune", response_model=RetuneResponse)
+def adaptive_retune() -> RetuneResponse:
+    """Trigger a fresh adaptive analysis and update parameters."""
+    try:
+        from football_intel.strategy.adaptive import AdaptiveAnalyzer
+        analyzer = AdaptiveAnalyzer()
+        analysis = analyzer.analyze_settled_trades()
+        total_settled = analysis["total_settled"]
+
+        if total_settled < AdaptiveAnalyzer.MIN_SAMPLES:
+            return RetuneResponse(
+                success=False,
+                message=(
+                    f"Not enough data: {total_settled}/{AdaptiveAnalyzer.MIN_SAMPLES} "
+                    f"settled trades needed."
+                ),
+                new_params=None,
+                total_settled=total_settled,
+                version=analyzer.load_params().version,
+            )
+
+        new_params = analyzer.compute_optimal_params(analysis)
+        analyzer.save_params(new_params)
+
+        # Reload signal cache so next signal request uses new params
+        _signal_cache.clear()
+
+        return RetuneResponse(
+            success=True,
+            message=f"Parameters updated to v{new_params.version} ({total_settled} samples).",
+            new_params=_build_adaptive_params_response(new_params.to_dict()),
+            total_settled=total_settled,
+            version=new_params.version,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Retune error: {exc}",
         ) from exc
 
 

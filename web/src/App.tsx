@@ -5,6 +5,7 @@ import PerformanceAccuracy from './pages/PerformanceAccuracy'
 import TradeLog from './pages/TradeLog'
 import Documentation from './pages/Documentation'
 import ModelInsights from './pages/ModelInsights'
+import AdaptiveTuning from './pages/AdaptiveTuning'
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/performance" element={<PerformanceAccuracy />} />
           <Route path="/trades" element={<TradeLog />} />
           <Route path="/insights" element={<ModelInsights />} />
+          <Route path="/tuning" element={<AdaptiveTuning />} />
           <Route path="/docs" element={<Documentation />} />
           <Route path="/accuracy" element={<Navigate to="/performance" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />

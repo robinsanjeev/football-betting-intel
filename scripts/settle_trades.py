@@ -296,6 +296,29 @@ def settle_all(
         summary["total_pnl"]     = 0.0
 
     # ------------------------------------------------------------------
+    # Adaptive feedback loop: update signal parameters if enough data
+    # ------------------------------------------------------------------
+    if not dry_run:
+        try:
+            from football_intel.strategy.adaptive import AdaptiveAnalyzer
+            analyzer = AdaptiveAnalyzer()
+            analysis = analyzer.analyze_settled_trades()
+            if analysis["total_settled"] >= AdaptiveAnalyzer.MIN_SAMPLES:
+                new_params = analyzer.compute_optimal_params(analysis)
+                analyzer.save_params(new_params)
+                logger.info("Adaptive params updated (v%d)", new_params.version)
+                summary["adaptive_version"] = new_params.version
+            else:
+                logger.info(
+                    "Adaptive: only %d/%d settled trades — warming up",
+                    analysis["total_settled"],
+                    AdaptiveAnalyzer.MIN_SAMPLES,
+                )
+                summary["adaptive_version"] = None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Adaptive feedback loop failed: %s", exc)
+
+    # ------------------------------------------------------------------
     # Telegram report
     # ------------------------------------------------------------------
     if send_telegram and settled_count > 0:

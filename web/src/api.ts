@@ -85,5 +85,18 @@ export async function fetchModelInsights(): Promise<ModelInsightsResponse> {
   return apiFetch<ModelInsightsResponse>('/model-insights')
 }
 
+export async function fetchAdaptiveData(): Promise<import('./types').AdaptiveReport> {
+  return apiFetch<import('./types').AdaptiveReport>('/adaptive')
+}
+
+export async function triggerRetune(): Promise<import('./types').RetuneResponse> {
+  const res = await fetch('/api/adaptive/retune', { method: 'POST' })
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error')
+    throw new Error(`API error ${res.status}: ${text}`)
+  }
+  return res.json() as Promise<import('./types').RetuneResponse>
+}
+
 // Re-export types for convenience
 export type { Signal, Trade, Performance, Accuracy, ActiveSignalsResponse, ModelInsightsResponse, TradesResponse }

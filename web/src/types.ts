@@ -161,3 +161,65 @@ export interface MatchInsight {
 export interface ModelInsightsResponse {
   matches: MatchInsight[];
 }
+
+// ---------------------------------------------------------------------------
+// Adaptive Tuning
+// ---------------------------------------------------------------------------
+
+export interface AdaptiveParams {
+  min_edge_by_type: Record<string, number>;
+  min_prob_by_type: Record<string, number>;
+  shrinkage_alpha_by_conf: Record<string, number>;
+  max_edge: number;
+  enabled_bet_types: string[];
+  enabled_confidence: string[];
+  updated_at: string;
+  sample_size: number;
+  version: number;
+}
+
+export interface GroupStats {
+  count: number;
+  wins: number;
+  win_rate: number;
+  total_pnl: number;
+  total_staked: number;
+  roi: number;
+  avg_edge: number;
+  avg_model_prob: number;
+  calibration_error: number;
+}
+
+export interface CalibrationPoint {
+  bucket: string;
+  predicted_midpoint: number;
+  actual_win_rate: number | null;
+  count: number;
+  calibration_error: number | null;
+}
+
+export interface AdaptiveReport {
+  status: 'ACTIVE' | 'WARMING_UP';
+  total_settled: number;
+  samples_needed: number;
+  min_samples: number;
+  current_params: AdaptiveParams;
+  default_params: AdaptiveParams;
+  edge_deltas: Record<string, number>;
+  alpha_deltas: Record<string, number>;
+  by_bet_type: Record<string, GroupStats>;
+  by_edge_bucket: Record<string, GroupStats>;
+  by_prob_bucket: Record<string, GroupStats>;
+  by_confidence: Record<string, GroupStats>;
+  calibration: CalibrationPoint[];
+  last_updated: string;
+  version: number;
+}
+
+export interface RetuneResponse {
+  success: boolean;
+  message: string;
+  new_params: AdaptiveParams | null;
+  total_settled: number;
+  version: number;
+}
