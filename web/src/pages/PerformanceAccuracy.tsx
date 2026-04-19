@@ -79,6 +79,10 @@ export default function PerformanceAccuracy() {
   // Table state
   const [resultFilter, setResultFilter] = useState<ResultFilter>('ALL')
   const [hidePending, setHidePending] = useState(true)  // default: show only settled
+  const [betTypeFilter, setBetTypeFilter] = useState('ALL')
+  const [competitionFilter, setCompetitionFilter] = useState('ALL')
+  const [confidenceFilter, setConfidenceFilter] = useState('ALL')
+  const [betPlacedFilter, setBetPlacedFilter] = useState('ALL') // ALL | YES | NO
   const [sortKey, setSortKey] = useState<SortKey>('timestamp')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
@@ -144,11 +148,16 @@ export default function PerformanceAccuracy() {
     })
   }, [signalHistory])
 
-  // Settled-only stats for KPI cards
-  const settledTrades = useMemo(() =>
-    enrichedTrades.filter((t) => t.result === 'WIN' || t.result === 'LOSE'),
-    [enrichedTrades]
-  )
+  // Settled trades (respects dimension filters for KPIs + charts)
+  const settledTrades = useMemo(() => {
+    let result = enrichedTrades.filter((t) => t.result === 'WIN' || t.result === 'LOSE')
+    if (betTypeFilter !== 'ALL') result = result.filter((t) => t.betType === betTypeFilter)
+    if (competitionFilter !== 'ALL') result = result.filter((t) => t.competition === competitionFilter)
+    if (confidenceFilter !== 'ALL') result = result.filter((t) => t.confidence === confidenceFilter)
+    if (betPlacedFilter === 'YES') result = result.filter((t) => t.betPlaced)
+    if (betPlacedFilter === 'NO') result = result.filter((t) => !t.betPlaced)
+    return result
+  }, [enrichedTrades, betTypeFilter, competitionFilter, confidenceFilter, betPlacedFilter])
 
   const settledStats = useMemo(() => {
     const wins = settledTrades.filter((t) => t.result === 'WIN').length
@@ -180,11 +189,27 @@ export default function PerformanceAccuracy() {
     return { wins, losses, total, winRate, totalPnl, totalStaked, roi, maxDrawdown: maxDd, avgEdge }
   }, [settledTrades])
 
+  // Unique values for filter dropdowns
+  const uniqueBetTypes = useMemo(() => {
+    const types = new Set(enrichedTrades.map((t) => t.betType))
+    return ['ALL', ...Array.from(types).sort()]
+  }, [enrichedTrades])
+
+  const uniqueCompetitions = useMemo(() => {
+    const comps = new Set(enrichedTrades.map((t) => t.competition))
+    return ['ALL', ...Array.from(comps).sort()]
+  }, [enrichedTrades])
+
   // Filter and sort
   const filteredTrades = useMemo(() => {
     let result = [...enrichedTrades]
     if (hidePending) result = result.filter((t) => t.result !== 'PENDING')
     if (resultFilter !== 'ALL') result = result.filter((t) => t.result === resultFilter)
+    if (betTypeFilter !== 'ALL') result = result.filter((t) => t.betType === betTypeFilter)
+    if (competitionFilter !== 'ALL') result = result.filter((t) => t.competition === competitionFilter)
+    if (confidenceFilter !== 'ALL') result = result.filter((t) => t.confidence === confidenceFilter)
+    if (betPlacedFilter === 'YES') result = result.filter((t) => t.betPlaced)
+    if (betPlacedFilter === 'NO') result = result.filter((t) => !t.betPlaced)
 
     result.sort((a, b) => {
       const dir = sortDir === 'asc' ? 1 : -1
@@ -531,27 +556,97 @@ export default function PerformanceAccuracy() {
             </div>
 
             {/* Filters */}
-            <div className="flex flex-wrap gap-1.5 mb-4">
-              <FilterButton
-                label={hidePending ? 'Settled Only' : 'All Signals'}
-                active={hidePending}
-                onClick={() => setHidePending(!hidePending)}
-              />
-              {(['ALL', 'WIN', 'LOSE'] as ResultFilter[]).map((f) => (
+            <div className="space-y-2 mb-4">
+              {/* Row 1: Result filters */}
+              <div className="flex flex-wrap gap-1.5">
                 <FilterButton
-                  key={f}
-                  label={f === 'ALL' ? `All (${settledTrades.length})` : `${f} (${settledTrades.filter((t) => t.result === f).length})`}
-                  active={resultFilter === f}
-                  onClick={() => setResultFilter(f)}
+                  label={hidePending ? 'Settled Only' : 'All Signals'}
+                  active={hidePending}
+                  onClick={() => setHidePending(!hidePending)}
                 />
-              ))}
-              {!hidePending && (
-                <FilterButton
-                  label={`PENDING (${enrichedTrades.filter((t) => t.result === 'PENDING').length})`}
-                  active={resultFilter === 'PENDING'}
-                  onClick={() => setResultFilter('PENDING')}
-                />
-              )}
+                <span className="w-px h-6 bg-[#1e1e3a] self-center" />
+                {(['ALL', 'WIN', 'LOSE'] as ResultFilter[]).map((f) => (
+                  <FilterButton
+                    key={f}
+                    label={f === 'ALL' ? `All (${settledTrades.length})` : `${f} (${settledTrades.filter((t) => t.result === f).length})`}
+                    active={resultFilter === f}
+                    onClick={() => setResultFilter(f)}
+                  />
+                ))}
+                {!hidePending && (
+                  <FilterButton
+                    label={`PENDING (${enrichedTrades.filter((t) => t.result === 'PENDING').length})`}
+                    active={resultFilter === 'PENDING'}
+                    onClick={() => setResultFilter('PENDING')}
+                  />
+                )}
+              </div>
+
+              {/* Row 2: Dimension filters */}
+              <div className="flex flex-wrap gap-1.5 items-center">
+                {/* Bet Type */}
+                <select
+                  value={betTypeFilter}
+                  onChange={(e) => setBetTypeFilter(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-full text-[11px] font-medium border bg-transparent text-[#a0a0c0] border-[#1e1e3a] hover:border-[#2e2e5a] focus:outline-none focus:border-[#9b6dff]/50 transition-all appearance-none cursor-pointer"
+                  style={{ backgroundImage: 'none' }}
+                >
+                  {uniqueBetTypes.map((t) => (
+                    <option key={t} value={t} className="bg-[#16162a] text-[#e2e2f0]">
+                      {t === 'ALL' ? 'All Types' : t.replace('_', '/')}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Competition */}
+                <select
+                  value={competitionFilter}
+                  onChange={(e) => setCompetitionFilter(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-full text-[11px] font-medium border bg-transparent text-[#a0a0c0] border-[#1e1e3a] hover:border-[#2e2e5a] focus:outline-none focus:border-[#9b6dff]/50 transition-all appearance-none cursor-pointer"
+                  style={{ backgroundImage: 'none' }}
+                >
+                  {uniqueCompetitions.map((c) => (
+                    <option key={c} value={c} className="bg-[#16162a] text-[#e2e2f0]">
+                      {c === 'ALL' ? 'All Leagues' : c}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Confidence */}
+                <select
+                  value={confidenceFilter}
+                  onChange={(e) => setConfidenceFilter(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-full text-[11px] font-medium border bg-transparent text-[#a0a0c0] border-[#1e1e3a] hover:border-[#2e2e5a] focus:outline-none focus:border-[#9b6dff]/50 transition-all appearance-none cursor-pointer"
+                  style={{ backgroundImage: 'none' }}
+                >
+                  <option value="ALL" className="bg-[#16162a] text-[#e2e2f0]">All Confidence</option>
+                  <option value="HIGH" className="bg-[#16162a] text-[#e2e2f0]">HIGH</option>
+                  <option value="MEDIUM" className="bg-[#16162a] text-[#e2e2f0]">MEDIUM</option>
+                  <option value="LOW" className="bg-[#16162a] text-[#e2e2f0]">LOW</option>
+                </select>
+
+                {/* Bet Placed */}
+                <select
+                  value={betPlacedFilter}
+                  onChange={(e) => setBetPlacedFilter(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-full text-[11px] font-medium border bg-transparent text-[#a0a0c0] border-[#1e1e3a] hover:border-[#2e2e5a] focus:outline-none focus:border-[#9b6dff]/50 transition-all appearance-none cursor-pointer"
+                  style={{ backgroundImage: 'none' }}
+                >
+                  <option value="ALL" className="bg-[#16162a] text-[#e2e2f0]">All Bets</option>
+                  <option value="YES" className="bg-[#16162a] text-[#e2e2f0]">Bet Placed</option>
+                  <option value="NO" className="bg-[#16162a] text-[#e2e2f0]">Signal Only</option>
+                </select>
+
+                {/* Active filter count + reset */}
+                {(betTypeFilter !== 'ALL' || competitionFilter !== 'ALL' || confidenceFilter !== 'ALL' || betPlacedFilter !== 'ALL') && (
+                  <button
+                    onClick={() => { setBetTypeFilter('ALL'); setCompetitionFilter('ALL'); setConfidenceFilter('ALL'); setBetPlacedFilter('ALL') }}
+                    className="px-2.5 py-1.5 rounded-full text-[11px] font-medium text-[#e84040] border border-[#e84040]/20 hover:bg-[#e84040]/10 transition-all"
+                  >
+                    × Clear filters
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Table */}
