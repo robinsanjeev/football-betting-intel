@@ -309,16 +309,13 @@ export default function PerformanceAccuracy() {
 
       {!loading && !error && perfData && (
         <>
-          {/* ── Page-level filters (top) ── */}
-          <div className="space-y-2 mb-6">
-            {/* Row 1: Result filters */}
-            <div className="flex flex-wrap gap-1.5">
+          {/* ── Page-level filters (single row) ── */}
+          <div className="flex flex-wrap gap-1.5 items-center mb-6">
               <FilterButton
-                label={hidePending ? 'Settled Only' : 'All Signals'}
+                label={hidePending ? 'Settled' : 'All'}
                 active={hidePending}
                 onClick={() => setHidePending(!hidePending)}
               />
-              <span className="w-px h-6 bg-[#1e1e3a] self-center" />
               {(['ALL', 'WIN', 'LOSE'] as ResultFilter[]).map((f) => (
                 <FilterButton
                   key={f}
@@ -334,10 +331,7 @@ export default function PerformanceAccuracy() {
                   onClick={() => setResultFilter('PENDING')}
                 />
               )}
-            </div>
-
-            {/* Row 2: Dimension filters */}
-            <div className="flex flex-wrap gap-1.5 items-center">
+              <span className="w-px h-6 bg-[#1e1e3a]" />
               <select
                 value={betTypeFilter}
                 onChange={(e) => setBetTypeFilter(e.target.value)}
@@ -390,7 +384,6 @@ export default function PerformanceAccuracy() {
                   × Clear
                 </button>
               )}
-            </div>
           </div>
 
           {/* ── Settled-only banner ── */}
