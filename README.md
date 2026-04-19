@@ -2,7 +2,7 @@
 
 AI-powered football betting signals using calibrated statistical models and real-time Kalshi market data.
 
-> **⚠️ Paper trading only.** This system tracks hypothetical bets for research purposes. No real money is wagered automatically.
+> **⚠️ Paper trading only.** This system tracks hypothetical bets for research purposes. No real money is wagered automatically. Please read the [full disclaimer](DISCLAIMER.md) before use.
 
 ---
 
@@ -220,6 +220,18 @@ Community Applications → Docker Compose → point to `docker-compose.yml`
 
 ---
 
+## ⚠️ Disclaimer
+
+This software is for **educational and research purposes only**. It is not financial or betting advice. You are solely responsible for any decisions you make. Past model performance does not guarantee future results. See [DISCLAIMER.md](DISCLAIMER.md) for full details.
+
+## Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Security
+
+Found a vulnerability? See [SECURITY.md](SECURITY.md) for responsible disclosure.
+
 ## License
 
-Private project. Not licensed for redistribution.
+MIT License — see [LICENSE](LICENSE) for details.
