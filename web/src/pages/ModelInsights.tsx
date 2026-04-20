@@ -557,9 +557,16 @@ export default function ModelInsights() {
     setError(null)
     try {
       const data = await fetchModelInsights()
-      setMatches(data.matches)
-      if (data.matches.length > 0 && !selectedMatch) {
-        setSelectedMatch(data.matches[0].match_title)
+      // Sort by kickoff date (nearest first), null dates at the end
+      const sorted = [...data.matches].sort((a, b) => {
+        if (!a.kickoff_utc && !b.kickoff_utc) return 0
+        if (!a.kickoff_utc) return 1
+        if (!b.kickoff_utc) return -1
+        return new Date(a.kickoff_utc).getTime() - new Date(b.kickoff_utc).getTime()
+      })
+      setMatches(sorted)
+      if (sorted.length > 0 && !selectedMatch) {
+        setSelectedMatch(sorted[0].match_title)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load model insights')
