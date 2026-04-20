@@ -139,6 +139,7 @@ export interface MatchInsight {
   competition: string;
   home_team: string;
   away_team: string;
+  kickoff_utc: string | null;
   home_crest: string;
   away_crest: string;
   league_emblem: string;

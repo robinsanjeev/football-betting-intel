@@ -202,6 +202,7 @@ class MatchInsightResponse(BaseModel):
     competition: str
     home_team: str
     away_team: str
+    kickoff_utc: Optional[str] = None  # ISO-8601 kickoff time
     home_crest: str
     away_crest: str
     league_emblem: str

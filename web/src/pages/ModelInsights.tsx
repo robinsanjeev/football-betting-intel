@@ -502,6 +502,13 @@ function MatchHeader({ insight }: { insight: MatchInsight }) {
             )}
             <span className="text-[11px] font-semibold text-[#6b6b8a] uppercase tracking-widest">{insight.competition}</span>
           </div>
+          {insight.kickoff_utc && (
+            <span className="text-[11px] text-[#a0a0c0] font-medium">
+              {new Date(insight.kickoff_utc).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+              {' · '}
+              {new Date(insight.kickoff_utc).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </span>
+          )}
           <div className="text-2xl font-bold text-[#9b6dff]">vs</div>
           <div className="flex items-center gap-3 text-[11px] text-[#6b6b8a]">
             <span>λ {insight.lambda_home.toFixed(2)}</span>
@@ -664,7 +671,14 @@ export default function ModelInsights() {
                       <span className="truncate">{m.match_title}</span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10px] text-[#6b6b8a]">{m.competition}</span>
+                      <span className="text-[10px] text-[#6b6b8a]">
+                        {m.competition}
+                        {m.kickoff_utc && (
+                          <span className="ml-1 text-[#a0a0c0]">
+                            · {new Date(m.kickoff_utc).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </span>
+                        )}
+                      </span>
                       {m.flagged_signals.length > 0 && (
                         <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-[#3ddc84]/15 text-[#3ddc84]">
                           {m.flagged_signals.length}

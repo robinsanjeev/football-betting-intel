@@ -969,6 +969,7 @@ def model_insights() -> ModelInsightsResponse:
                         competition=comp,
                         home_team=match.home_team,
                         away_team=match.away_team,
+                        kickoff_utc=match.kickoff_utc.isoformat() if match.kickoff_utc else None,
                         home_crest=home_crest,
                         away_crest=away_crest,
                         league_emblem=league_emblem,
