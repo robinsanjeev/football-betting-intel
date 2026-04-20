@@ -391,7 +391,34 @@ class KalshiSoccerClient:
         if raw:
             return self._parse_iso(raw)
 
-        return None
+        # Fall back to parsing date from event ticker (e.g. KXEPLGAME-26MAY04EVEMCI → 2026-05-04)
+        ticker = event.get("event_ticker", "")
+        return self._parse_date_from_ticker(ticker)
+
+    @staticmethod
+    def _parse_date_from_ticker(ticker: str) -> Optional[datetime]:
+        """Extract date from Kalshi event ticker like KXEPLGAME-26MAY04EVEMCI.
+
+        The date portion after the first '-' is encoded as YYMMMDD where
+        YY = 2-digit year, MMM = 3-letter month, DD = 2-digit day.
+        """
+        import re
+        # Match pattern: -YYMMMDD after the series prefix
+        m = re.search(r'-(\d{2})([A-Z]{3})(\d{2})', ticker)
+        if not m:
+            return None
+        try:
+            year = 2000 + int(m.group(1))
+            month_str = m.group(2)
+            day = int(m.group(3))
+            months = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                      'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+            month = months.get(month_str)
+            if not month:
+                return None
+            return datetime(year, month, day)
+        except (ValueError, KeyError):
+            return None
 
     @staticmethod
     def _parse_iso(s: str) -> Optional[datetime]:

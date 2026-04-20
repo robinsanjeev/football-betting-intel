@@ -504,9 +504,13 @@ function MatchHeader({ insight }: { insight: MatchInsight }) {
           </div>
           {insight.kickoff_utc && (
             <span className="text-[11px] text-[#a0a0c0] font-medium">
-              {new Date(insight.kickoff_utc).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-              {' · '}
-              {new Date(insight.kickoff_utc).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+              {(() => {
+                const d = new Date(insight.kickoff_utc)
+                const dateStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                // Only show time if it's not midnight (i.e. we have actual kickoff time)
+                const hasTime = d.getHours() !== 0 || d.getMinutes() !== 0
+                return hasTime ? `${dateStr} · ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : dateStr
+              })()}
             </span>
           )}
           <div className="text-2xl font-bold text-[#9b6dff]">vs</div>
