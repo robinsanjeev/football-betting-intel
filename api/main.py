@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -19,7 +21,6 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from football_intel.api.cache import SignalCache
 from football_intel.api.models import (
     AccuracyResponse,
     AdaptiveParamsResponse,
@@ -70,10 +71,98 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# In-memory signal cache (shared across requests)
+# Shared pipeline cache (thread-safe, 15-min TTL)
 # ---------------------------------------------------------------------------
 
-_signal_cache = SignalCache(ttl_seconds=900)  # 15 minutes
+
+class _PipelineCache:
+    """Thread-safe in-memory cache for the full pipeline output.
+
+    Stores the calibrated model, Kalshi matches, generated signals, and the
+    pre-processed signal dicts so that both `/api/signals/active` and
+    `/api/model-insights` can share a single pipeline run.
+    """
+
+    TTL = 900  # 15 minutes
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._model: Any = None
+        self._matches: Any = None
+        self._signals: Any = None
+        self._signal_dicts: Optional[List[Dict[str, Any]]] = None
+        self._generated_at: Optional[datetime] = None
+        self._total_matches: int = 0
+        self._set_time: Optional[float] = None
+
+    # ------------------------------------------------------------------
+    # Internal helpers (call with lock held)
+    # ------------------------------------------------------------------
+
+    def _is_stale(self) -> bool:
+        if self._set_time is None:
+            return True
+        return (time.monotonic() - self._set_time) >= self.TTL
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def is_stale(self) -> bool:
+        with self._lock:
+            return self._is_stale()
+
+    def get(self) -> Optional[Dict[str, Any]]:
+        """Return cached pipeline data dict, or None if stale/empty."""
+        with self._lock:
+            if self._is_stale():
+                return None
+            return {
+                "model": self._model,
+                "matches": self._matches,
+                "signals": self._signals,
+                "signal_dicts": self._signal_dicts,
+                "generated_at": self._generated_at,
+                "total_matches": self._total_matches,
+            }
+
+    def set(
+        self,
+        *,
+        model: Any,
+        matches: Any,
+        signals: Any,
+        signal_dicts: List[Dict[str, Any]],
+        generated_at: datetime,
+        total_matches: int,
+    ) -> None:
+        with self._lock:
+            self._model = model
+            self._matches = matches
+            self._signals = signals
+            self._signal_dicts = signal_dicts
+            self._generated_at = generated_at
+            self._total_matches = total_matches
+            self._set_time = time.monotonic()
+
+    @property
+    def generated_at(self) -> Optional[datetime]:
+        with self._lock:
+            return self._generated_at
+
+    def clear(self) -> None:
+        """Invalidate the cache immediately."""
+        with self._lock:
+            self._set_time = None
+            self._model = None
+            self._matches = None
+            self._signals = None
+            self._signal_dicts = None
+            self._generated_at = None
+            self._total_matches = 0
+
+
+_pipeline_cache = _PipelineCache()
 
 # ---------------------------------------------------------------------------
 # Team crest helpers
@@ -287,15 +376,21 @@ def _upsert_signal_history(
 
 
 # ---------------------------------------------------------------------------
-# Pipeline runner (generates live signals)
+# Pipeline runner — shared across both signal and model-insights endpoints
 # ---------------------------------------------------------------------------
 
-def _run_pipeline() -> tuple[List[Dict[str, Any]], int]:
-    """Run the full prediction pipeline and return (signals_dicts, total_matches).
+_LEAGUE_EMBLEMS: Dict[str, str] = {
+    "EPL": "https://crests.football-data.org/PL.png",
+    "Bundesliga": "https://crests.football-data.org/BL1.png",
+    "UCL": "https://crests.football-data.org/CL.png",
+}
 
-    Returns:
-        signals_dicts: list of raw signal dicts (from BettingSignal dataclasses)
-        total_matches: number of Kalshi matches scanned
+
+def _run_full_pipeline() -> Dict[str, Any]:
+    """Calibrate model, fetch Kalshi, generate signals, and build signal dicts.
+
+    Returns a dict with keys:
+        model, matches, signals, signal_dicts, generated_at, total_matches
     """
     from football_intel.models.historical_data import load_historical_results
     from football_intel.models.calibrated_poisson import CalibratedPoissonModel
@@ -321,19 +416,12 @@ def _run_pipeline() -> tuple[List[Dict[str, Any]], int]:
     # Load team crests
     crests = _load_crests()
 
-    # League emblem mapping
-    league_emblems = {
-        "EPL": "https://crests.football-data.org/PL.png",
-        "Bundesliga": "https://crests.football-data.org/BL1.png",
-        "UCL": "https://crests.football-data.org/CL.png",
-    }
-
     # Convert BettingSignal dataclasses to dicts
-    signal_dicts = []
+    signal_dicts: List[Dict[str, Any]] = []
     for i, sig in enumerate(signals, start=1):
         entry_cents = int(round(sig.kalshi_implied_prob * 100))
         upside_cents = 100 - entry_cents
-        # Score = probability-adjusted: edge * model confidence * 100
+        # Score = probability-adjusted: edge * model confidence
         # High-prob + high-edge = high score; low-prob longshots score lower
         score = int(min(sig.edge * sig.model_prob * 400, 100))
 
@@ -343,7 +431,7 @@ def _run_pipeline() -> tuple[List[Dict[str, Any]], int]:
         away_name = parts[1].strip() if len(parts) >= 2 else ""
         home_crest = _find_crest(crests, home_name)
         away_crest = _find_crest(crests, away_name)
-        league_emblem = league_emblems.get(sig.competition, "")
+        league_emblem = _LEAGUE_EMBLEMS.get(sig.competition, "")
 
         signal_dicts.append({
             "id": i,
@@ -368,14 +456,49 @@ def _run_pipeline() -> tuple[List[Dict[str, Any]], int]:
             "league_emblem": league_emblem,
         })
 
-    return signal_dicts, total_matches
+    return {
+        "model": model,
+        "matches": matches,
+        "signals": signals,
+        "signal_dicts": signal_dicts,
+        "generated_at": datetime.now(tz=timezone.utc),
+        "total_matches": total_matches,
+    }
 
 
-def _get_signals_from_pipeline() -> tuple[List[Dict[str, Any]], int, datetime]:
-    """Run the signal pipeline and return signals with a shared batch timestamp."""
-    signal_dicts, total_matches = _run_pipeline()
-    generated_at = datetime.now(tz=timezone.utc)
-    return signal_dicts, total_matches, generated_at
+def _get_cached_pipeline() -> Dict[str, Any]:
+    """Return pipeline data from cache, running the pipeline if stale.
+
+    Thread-safe: only one pipeline run is allowed at a time; concurrent
+    requests wait and then pick up the freshly cached result.
+    """
+    cached = _pipeline_cache.get()
+    if cached is not None:
+        return cached
+
+    # Acquire the internal lock so only one thread runs the pipeline.
+    with _pipeline_cache._lock:
+        # Re-check after acquiring lock (another thread may have populated it).
+        if not _pipeline_cache._is_stale():
+            return {
+                "model": _pipeline_cache._model,
+                "matches": _pipeline_cache._matches,
+                "signals": _pipeline_cache._signals,
+                "signal_dicts": _pipeline_cache._signal_dicts,
+                "generated_at": _pipeline_cache._generated_at,
+                "total_matches": _pipeline_cache._total_matches,
+            }
+
+        data = _run_full_pipeline()
+        # Populate fields directly (we already hold the lock).
+        _pipeline_cache._model = data["model"]
+        _pipeline_cache._matches = data["matches"]
+        _pipeline_cache._signals = data["signals"]
+        _pipeline_cache._signal_dicts = data["signal_dicts"]
+        _pipeline_cache._generated_at = data["generated_at"]
+        _pipeline_cache._total_matches = data["total_matches"]
+        _pipeline_cache._set_time = time.monotonic()
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -396,12 +519,13 @@ def health() -> HealthResponse:
     except Exception:
         pass
 
+    cached = _pipeline_cache.get()
     return HealthResponse(
         status="ok",
         db_path=db_path,
         db_accessible=db_accessible,
-        cache_stale=_signal_cache.is_stale(),
-        signals_cached=len(_signal_cache.get() or []),
+        cache_stale=_pipeline_cache.is_stale(),
+        signals_cached=len(cached["signal_dicts"] if cached else []),
     )
 
 
@@ -410,40 +534,36 @@ def signals_active() -> SignalsListResponse:
     """Return current live betting signals.
 
     Runs the full pipeline on first call or after cache expiry (15 min TTL).
+    Subsequent calls within the TTL window are served instantly from cache.
     Signals are sorted by EV per dollar descending.
     """
-    # Try to serve from cache
-    cached = _signal_cache.get()
-    if cached is not None:
-        generated_at = _signal_cache.generated_at
-        return SignalsListResponse(
-            signals=[SignalResponse(**s) for s in cached],
-            generated_at=generated_at.isoformat() if generated_at else datetime.now(tz=timezone.utc).isoformat(),
-            total_matches_scanned=0,  # not stored in cache but cached means fresh
-        )
+    cache_was_fresh = not _pipeline_cache.is_stale()
 
-    # Cache miss — run the pipeline
     try:
-        signal_dicts, total_matches, generated_at = _get_signals_from_pipeline()
+        data = _get_cached_pipeline()
     except Exception as exc:
         raise HTTPException(
             status_code=503,
             detail=f"Pipeline error: {exc}",
         ) from exc
 
-    conn = _get_db_connection()
-    try:
-        _ensure_signal_history_table(conn)
-        _upsert_signal_history(conn, signal_dicts, generated_at)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Signal history persistence error: {exc}",
-        ) from exc
-    finally:
-        conn.close()
+    signal_dicts: List[Dict[str, Any]] = data["signal_dicts"]
+    generated_at: datetime = data["generated_at"]
+    total_matches: int = data["total_matches"]
 
-    _signal_cache.set(signal_dicts, generated_at)
+    # Only persist to DB on a fresh pipeline run (not on cache hits)
+    if not cache_was_fresh:
+        conn = _get_db_connection()
+        try:
+            _ensure_signal_history_table(conn)
+            _upsert_signal_history(conn, signal_dicts, generated_at)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Signal history persistence error: {exc}",
+            ) from exc
+        finally:
+            conn.close()
 
     return SignalsListResponse(
         signals=[SignalResponse(**s) for s in signal_dicts],
@@ -798,33 +918,30 @@ def signals_history(
 def model_insights() -> ModelInsightsResponse:
     """Return per-match model insights: lambdas, strengths, scoreline matrix, distribution.
 
-    Runs the full pipeline fresh each call (no separate cache — pipeline is
-    already cached in `_signal_cache` if called recently).  Falls back to an
-    empty list if the pipeline fails so the frontend degrades gracefully.
+    Re-uses the shared pipeline cache (calibration + Kalshi fetch + signal
+    generation) so that calling this endpoint right after `/api/signals/active`
+    (or vice-versa) costs nothing extra.  Only the per-match scoreline matrix
+    and market-price extraction are computed fresh per request.
     """
     try:
-        from football_intel.models.historical_data import load_historical_results
         from football_intel.models.calibrated_poisson import (
-            CalibratedPoissonModel,
             _compute_scoreline_matrix,
             normalise_team_name,
             TeamStrength as _TS,
         )
-        from football_intel.ingestion.kalshi_soccer import KalshiSoccerClient
-        from football_intel.strategy.signal_generator import SignalGenerator
 
-        # --- 1. Calibrate model ------------------------------------------
-        results = load_historical_results()
-        model = CalibratedPoissonModel()
-        model.calibrate(results)
+        # --- Fetch from shared cache (runs pipeline if stale) -------------
+        try:
+            pipeline = _get_cached_pipeline()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Pipeline error: {exc}",
+            ) from exc
 
-        # --- 2. Fetch Kalshi matches --------------------------------------
-        ks_client = KalshiSoccerClient()
-        matches = ks_client.fetch_match_markets()
-
-        # --- 3. Generate signals -----------------------------------------
-        generator = SignalGenerator(model)
-        signals = generator.generate_signals(matches, min_edge=0.05)
+        model = pipeline["model"]
+        matches = pipeline["matches"]
+        signals = pipeline["signals"]
 
         # Group signals by match_title for easy lookup
         signals_by_match: Dict[str, List[Any]] = {}
@@ -833,11 +950,7 @@ def model_insights() -> ModelInsightsResponse:
 
         # Shared helpers
         crests = _load_crests()
-        league_emblems = {
-            "EPL": "https://crests.football-data.org/PL.png",
-            "Bundesliga": "https://crests.football-data.org/BL1.png",
-            "UCL": "https://crests.football-data.org/CL.png",
-        }
+        league_emblems = _LEAGUE_EMBLEMS
         _default_strength = _TS(
             attack_home=1.0, attack_away=1.0,
             defense_home=1.0, defense_away=1.0,
@@ -1022,6 +1135,8 @@ def model_insights() -> ModelInsightsResponse:
 
         return ModelInsightsResponse(matches=match_insights)
 
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=503,
@@ -1109,8 +1224,8 @@ def adaptive_retune() -> RetuneResponse:
         new_params = analyzer.compute_optimal_params(analysis)
         analyzer.save_params(new_params)
 
-        # Reload signal cache so next signal request uses new params
-        _signal_cache.clear()
+        # Invalidate pipeline cache so next signal request uses new params
+        _pipeline_cache.clear()
 
         return RetuneResponse(
             success=True,

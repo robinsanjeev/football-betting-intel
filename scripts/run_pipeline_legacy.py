@@ -1,4 +1,7 @@
-"""Production pipeline runner — dual-track: Match + Futures.
+"""⚠️ DEPRECATED — This module is superseded by scripts/run_signals.py. Kept for reference only.
+
+Original description:
+Production pipeline runner — dual-track: Match + Futures.
 
 Track 1 (Match): football-data.org matches + Odds API odds + Poisson model → per-match EV
 Track 2 (Futures): Kalshi soccer futures + heuristic model → season-level signals

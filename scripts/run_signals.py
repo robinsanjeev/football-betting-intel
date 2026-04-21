@@ -104,6 +104,23 @@ def _print_signals(signals: List[BettingSignal], top_n: int = 30) -> None:
     print(f"\n  Showing {len(signals_to_show)} of {len(signals)} total signal(s) with edge ≥ {signals[0].edge:.1%} min\n")
 
 
+def _ensure_telegram_sent_column(conn) -> None:  # type: ignore[type-arg]
+    """Add the telegram_sent column to signal_history if it does not exist.
+
+    Uses PRAGMA table_info instead of a bare ALTER TABLE so we never hit a
+    'duplicate column' error on repeated invocations.
+    """
+    existing_cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(signal_history)").fetchall()
+    }
+    if "telegram_sent" not in existing_cols:
+        conn.execute(
+            "ALTER TABLE signal_history ADD COLUMN telegram_sent INTEGER DEFAULT 0"
+        )
+        conn.commit()
+
+
 def main() -> int:
     """Run the full signal pipeline.
 
@@ -221,7 +238,7 @@ def main() -> int:
             for sig in signals:
                 entry_cents = int(round(sig.kalshi_implied_prob * 100))
                 upside_cents = 100 - entry_cents
-                score = int(min(sig.edge * 200, 100))
+                score = int(min(sig.edge * sig.model_prob * 400, 100))
                 conn.execute("""
                     INSERT INTO signal_history (
                         generated_at, event_ticker, market_ticker, match_title,
@@ -260,15 +277,7 @@ def main() -> int:
             import sqlite3 as _sq
             _db = os.environ.get("FOOTBALL_INTEL_DB", "football_intel/data/football_intel.db")
             _conn = _sq.connect(_db)
-            _conn.execute("ALTER TABLE signal_history ADD COLUMN telegram_sent INTEGER DEFAULT 0")
-            _conn.commit()
-            # ^^^ ALTER silently fails if column already exists (sqlite behavior on duplicate)
-            # but let's be safe:
-            try:
-                _conn.execute("ALTER TABLE signal_history ADD COLUMN telegram_sent INTEGER DEFAULT 0")
-                _conn.commit()
-            except Exception:
-                pass  # column already exists
+            _ensure_telegram_sent_column(_conn)
 
             # Get already-sent market tickers
             already_sent = set(

@@ -1,4 +1,7 @@
-"""End-to-end sanity-check flow for one league + Kalshi markets.
+"""⚠️ DEPRECATED — This demo uses the old naive Poisson model and is superseded by run_signals.py. Kept for reference only.
+
+Original description:
+End-to-end sanity-check flow for one league + Kalshi markets.
 
 This script:
 - Loads config and logger

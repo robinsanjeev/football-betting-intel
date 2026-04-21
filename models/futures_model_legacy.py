@@ -1,4 +1,7 @@
-"""Simple futures/season-outcome model.
+"""⚠️ DEPRECATED — This module is not used by the current pipeline. Kept for reference only.
+
+Original description:
+Simple futures/season-outcome model.
 
 For league champion markets, we use current standings + points-per-game
 projections to estimate title probabilities. For player/transfer markets,

@@ -1,4 +1,7 @@
-"""Football Intel — Betting Dashboard.
+"""⚠️ DEPRECATED — This Streamlit dashboard is superseded by the React frontend (web/). Kept for reference only.
+
+Original description:
+Football Intel — Betting Dashboard.
 
 Self-contained Streamlit app that reads directly from the SQLite ledger.
 No imports from football_intel modules — runs standalone.
