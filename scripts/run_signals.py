@@ -252,31 +252,74 @@ def main() -> int:
 
     # ── Telegram alerts + ledger logging (opt-in via --telegram) ─────────
     if args.telegram:
-        top3 = signals[:3]
-        if not top3:
+        if not signals:
             print("  ⚠  No signals to send via Telegram.")
         else:
-            telegram = TelegramClient()
-            ledger = Ledger()
-            print(f"\n[Telegram] Sending top {len(top3)} signal(s)…")
-            for sig in top3:
-                try:
-                    telegram.send_signal_alert(sig, topic_id=args.topic_id)
-                    print(f"  ✓ Sent: {sig.match_title} ({sig.bet_type})")
-                except Exception as exc:  # noqa: BLE001
-                    print(f"  ✗ Telegram send failed for {sig.match_title}: {exc}")
+            # Only send signals that haven't been sent to Telegram yet
+            import os
+            import sqlite3 as _sq
+            _db = os.environ.get("FOOTBALL_INTEL_DB", "football_intel/data/football_intel.db")
+            _conn = _sq.connect(_db)
+            _conn.execute("ALTER TABLE signal_history ADD COLUMN telegram_sent INTEGER DEFAULT 0")
+            _conn.commit()
+            # ^^^ ALTER silently fails if column already exists (sqlite behavior on duplicate)
+            # but let's be safe:
+            try:
+                _conn.execute("ALTER TABLE signal_history ADD COLUMN telegram_sent INTEGER DEFAULT 0")
+                _conn.commit()
+            except Exception:
+                pass  # column already exists
 
-                try:
-                    ledger.log_trade(
-                        match=sig.match_title,
-                        side=sig.description,
-                        stake=10.0,
-                        odds=sig.kalshi_odds,
-                    )
-                    print(f"  ✓ Logged to ledger: {sig.match_title} | {sig.description} @ {sig.kalshi_odds:.2f}")
-                except Exception as exc:  # noqa: BLE001
-                    print(f"  ✗ Ledger log failed for {sig.match_title}: {exc}")
-            print()
+            # Get already-sent market tickers
+            already_sent = set(
+                r[0] for r in _conn.execute(
+                    "SELECT market_ticker FROM signal_history WHERE telegram_sent = 1"
+                ).fetchall()
+            )
+            _conn.close()
+
+            # Filter to only new signals
+            new_signals = [s for s in signals if s.market_ticker not in already_sent]
+            top3 = new_signals[:3]
+
+            if not top3:
+                print("\n[Telegram] No new signals to send (all already alerted).")
+            else:
+                telegram = TelegramClient()
+                ledger = Ledger()
+                print(f"\n[Telegram] Sending {len(top3)} NEW signal(s) ({len(already_sent)} already sent)…")
+                sent_tickers = []
+                for sig in top3:
+                    try:
+                        telegram.send_signal_alert(sig, topic_id=args.topic_id)
+                        print(f"  ✓ Sent: {sig.match_title} ({sig.bet_type})")
+                        sent_tickers.append(sig.market_ticker)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"  ✗ Telegram send failed for {sig.match_title}: {exc}")
+
+                    try:
+                        ledger.log_trade(
+                            match=sig.match_title,
+                            side=sig.description,
+                            stake=10.0,
+                            odds=sig.kalshi_odds,
+                        )
+                        print(f"  ✓ Logged to ledger: {sig.match_title} | {sig.description} @ {sig.kalshi_odds:.2f}")
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"  ✗ Ledger log failed for {sig.match_title}: {exc}")
+
+                # Mark as sent in DB
+                if sent_tickers:
+                    _conn2 = _sq.connect(_db)
+                    for ticker in sent_tickers:
+                        _conn2.execute(
+                            "UPDATE signal_history SET telegram_sent = 1 WHERE market_ticker = ?",
+                            (ticker,),
+                        )
+                    _conn2.commit()
+                    _conn2.close()
+                    print(f"  ✓ Marked {len(sent_tickers)} signal(s) as sent")
+                print()
 
     return 0
 
