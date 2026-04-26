@@ -19,18 +19,18 @@ Historical Results (football-data.org)    Kalshi Live Markets    The Odds API
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    Calibrated Poisson Model                             │
-│  • Per-team attack/defense strengths (Dixon-Coles corrected)           │
-│  • Recency-weighted (60-day half-life — recent form counts more)       │
-│  • 875+ matches across EPL, Bundesliga, UCL                            │
+│  • Per-team attack/defense strengths (Dixon-Coles corrected)            │
+│  • Recency-weighted (60-day half-life — recent form counts more)        │
+│  • 875+ matches across EPL, Bundesliga, UCL                             │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                      Signal Generation                                  │
-│  • Market-aware edge shrinkage (blends model with market by confidence)│
-│  • Min 8% edge threshold · 15% min win probability                     │
-│  • Edge cap at 25% · Confidence-based bet sizing                       │
-│  • Probability-adjusted EV scoring                                     │
+│  • Market-aware edge shrinkage (blends model with market by confidence) │
+│  • Min 8% edge threshold · 15% min win probability                      │
+│  • Edge cap at 25% · Confidence-based bet sizing                        │
+│  • Probability-adjusted EV scoring                                      │
 └───────────┬──────────────────────┬──────────────────────┬───────────────┘
             │                      │                      │
             ▼                      ▼                      ▼
