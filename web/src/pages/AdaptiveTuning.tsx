@@ -1,16 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchAdaptiveData, triggerRetune } from '../api'
 import type { AdaptiveReport, GroupStats } from '../types'
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-} from 'recharts'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -71,12 +61,82 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   )
 }
 
+// ---------------------------------------------------------------------------
+// Composite Score Overview
+// ---------------------------------------------------------------------------
+
+const SCORE_COMPONENTS = [
+  { label: 'Model Confidence', weight: 40, color: '#9b6dff' },
+  { label: 'Data Quality', weight: 20, color: '#6dafff' },
+  { label: 'Edge', weight: 15, color: '#6dffb3' },
+  { label: 'Market Alignment', weight: 15, color: '#ffd76d' },
+  { label: 'Bet Type Bonus', weight: 10, color: '#ff6d9b' },
+]
+
+function CompositeScoreOverview({ minScore }: { minScore: number }) {
+  return (
+    <div className="space-y-5">
+      {/* Threshold highlight */}
+      <div className="flex items-center gap-4">
+        <div className="bg-[#0d0d1a] rounded-lg px-5 py-3 border border-[#9b6dff]/40">
+          <div className="text-xs text-[#6b6b8a] uppercase tracking-wider mb-1">
+            Min Composite Score
+          </div>
+          <div className="text-2xl font-bold text-[#9b6dff] font-mono">{minScore.toFixed(1)}</div>
+        </div>
+        <p className="text-xs text-[#6b6b8a] leading-relaxed max-w-md">
+          Signals must reach this composite score threshold (0–100) to emit.
+          The score is computed from weighted components below.
+        </p>
+      </div>
+
+      {/* Stacked weight bar */}
+      <div>
+        <div className="text-xs text-[#6b6b8a] uppercase tracking-wider mb-2">
+          Score Weight Distribution
+        </div>
+        <div className="flex h-7 rounded-lg overflow-hidden border border-[#1e1e3a]">
+          {SCORE_COMPONENTS.map((c) => (
+            <div
+              key={c.label}
+              className="flex items-center justify-center text-[10px] font-semibold text-[#0d0d1a] transition-all"
+              style={{ width: `${c.weight}%`, backgroundColor: c.color }}
+              title={`${c.label}: ${c.weight}%`}
+            >
+              {c.weight >= 15 ? `${c.weight}%` : ''}
+            </div>
+          ))}
+        </div>
+        {/* Legend */}
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+          {SCORE_COMPONENTS.map((c) => (
+            <div key={c.label} className="flex items-center gap-1.5 text-xs text-[#9b9bb8]">
+              <span
+                className="inline-block w-2.5 h-2.5 rounded-sm"
+                style={{ backgroundColor: c.color }}
+              />
+              {c.label} ({c.weight}%)
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Bet Type Table (modernized: Min Prob instead of Min Edge)
+// ---------------------------------------------------------------------------
+
 function BetTypeTable({
   byBetType,
   currentParams,
 }: {
   byBetType: Record<string, GroupStats>
-  currentParams: { min_edge_by_type: Record<string, number>; enabled_bet_types: string[] }
+  currentParams: {
+    min_prob_by_type: Record<string, number>
+    enabled_bet_types: string[]
+  }
 }) {
   const BET_TYPES = ['MONEYLINE', 'OVER_UNDER', 'BTTS', 'SPREAD', 'FIRST_HALF']
   return (
@@ -88,14 +148,14 @@ function BetTypeTable({
             <th className="text-right py-2 px-3">Count</th>
             <th className="text-right py-2 px-3">Win Rate</th>
             <th className="text-right py-2 px-3">ROI</th>
-            <th className="text-right py-2 px-3">Min Edge</th>
+            <th className="text-right py-2 px-3">Min Prob</th>
             <th className="text-right py-2 px-3">Status</th>
           </tr>
         </thead>
         <tbody>
           {BET_TYPES.map((bt) => {
             const stats = byBetType[bt]
-            const minEdge = currentParams.min_edge_by_type[bt] ?? 0.08
+            const minProb = currentParams.min_prob_by_type[bt] ?? 0.5
             const enabled = currentParams.enabled_bet_types.includes(bt)
             return (
               <tr key={bt} className="border-b border-[#1a1a2e] hover:bg-[#1a1a2e]/50">
@@ -112,7 +172,7 @@ function BetTypeTable({
                   {stats ? `${stats.roi >= 0 ? '+' : ''}${pct(stats.roi)}` : '—'}
                 </td>
                 <td className="text-right px-3 text-[#9b6dff]">
-                  {pct(minEdge)}
+                  {pct(minProb)}
                 </td>
                 <td className="text-right px-3">
                   <span
@@ -134,65 +194,9 @@ function BetTypeTable({
   )
 }
 
-function EdgeBucketTable({ byEdgeBucket }: { byEdgeBucket: Record<string, GroupStats> }) {
-  const buckets = ['8-12%', '12-16%', '16-20%', '20%+']
-  const chartData = buckets.map((b) => ({
-    name: b,
-    roi: byEdgeBucket[b] ? +(byEdgeBucket[b].roi * 100).toFixed(1) : null,
-    win_rate: byEdgeBucket[b] ? +(byEdgeBucket[b].win_rate * 100).toFixed(1) : null,
-    count: byEdgeBucket[b]?.count ?? 0,
-  }))
-
-  return (
-    <div className="space-y-4">
-      <ResponsiveContainer width="100%" height={160}>
-        <BarChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1e1e3a" />
-          <XAxis dataKey="name" tick={{ fill: '#6b6b8a', fontSize: 11 }} />
-          <YAxis tick={{ fill: '#6b6b8a', fontSize: 11 }} unit="%" />
-          <Tooltip
-            contentStyle={{ background: '#12121f', border: '1px solid #1e1e3a', borderRadius: 8 }}
-            labelStyle={{ color: '#e2e2f0' }}
-            itemStyle={{ color: '#9b6dff' }}
-            formatter={(v: number) => [`${v}%`, '']}
-          />
-          <ReferenceLine y={0} stroke="#6b6b8a" strokeDasharray="3 3" />
-          <Bar dataKey="roi" name="ROI" fill="#9b6dff" radius={[3, 3, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-[10px] uppercase tracking-wider text-[#6b6b8a] border-b border-[#1e1e3a]">
-              <th className="text-left py-2 pr-4">Edge Range</th>
-              <th className="text-right py-2 px-3">Count</th>
-              <th className="text-right py-2 px-3">Win Rate</th>
-              <th className="text-right py-2 px-3">ROI</th>
-            </tr>
-          </thead>
-          <tbody>
-            {buckets.map((b) => {
-              const s = byEdgeBucket[b]
-              return (
-                <tr key={b} className="border-b border-[#1a1a2e] hover:bg-[#1a1a2e]/50">
-                  <td className="py-2.5 pr-4 font-medium text-[#c9c9e3]">{b}</td>
-                  <td className="text-right px-3 text-[#9b9bb8]">{s?.count ?? '—'}</td>
-                  <td className={`text-right px-3 ${s ? winRateColor(s.win_rate) : 'text-[#6b6b8a]'}`}>
-                    {s ? pct(s.win_rate) : '—'}
-                  </td>
-                  <td className={`text-right px-3 ${s ? roiColor(s.roi) : 'text-[#6b6b8a]'}`}>
-                    {s ? `${s.roi >= 0 ? '+' : ''}${pct(s.roi)}` : '—'}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
+// ---------------------------------------------------------------------------
+// Probability Calibration (kept as-is)
+// ---------------------------------------------------------------------------
 
 function ProbCalibrationTable({ calibration }: { calibration: AdaptiveReport['calibration'] }) {
   return (
@@ -236,6 +240,10 @@ function ProbCalibrationTable({ calibration }: { calibration: AdaptiveReport['ca
   )
 }
 
+// ---------------------------------------------------------------------------
+// Confidence Table (cleaned up — no Alpha column)
+// ---------------------------------------------------------------------------
+
 function ConfidenceTable({
   byConfidence,
   enabledConfidence,
@@ -252,7 +260,6 @@ function ConfidenceTable({
             <th className="text-right py-2 px-3">Count</th>
             <th className="text-right py-2 px-3">Win Rate</th>
             <th className="text-right py-2 px-3">ROI</th>
-            <th className="text-right py-2 px-3">Alpha</th>
             <th className="text-right py-2 px-3">Status</th>
           </tr>
         </thead>
@@ -269,9 +276,6 @@ function ConfidenceTable({
                 </td>
                 <td className={`text-right px-3 ${s ? roiColor(s.roi) : 'text-[#6b6b8a]'}`}>
                   {s ? `${s.roi >= 0 ? '+' : ''}${pct(s.roi)}` : '—'}
-                </td>
-                <td className="text-right px-3 text-[#9b6dff]">
-                  {/* Alpha not shown per-row (shown in params section) */}—
                 </td>
                 <td className="text-right px-3">
                   <span
@@ -293,13 +297,15 @@ function ConfidenceTable({
   )
 }
 
+// ---------------------------------------------------------------------------
+// Current Parameters (restructured: Signal Filters + Model Tuning)
+// ---------------------------------------------------------------------------
+
 function CurrentParamsCard({
   params,
-  edgeDeltas,
   alphaDeltas,
 }: {
   params: AdaptiveReport['current_params']
-  edgeDeltas: Record<string, number>
   alphaDeltas: Record<string, number>
 }) {
   function delta(v: number) {
@@ -311,35 +317,46 @@ function CurrentParamsCard({
     )
   }
 
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      {/* Min Edge */}
-      <div className="bg-[#0d0d1a] rounded-lg p-4 border border-[#1e1e3a]">
-        <div className="text-xs text-[#6b6b8a] uppercase tracking-wider mb-3">Min Edge by Type</div>
-        {Object.entries(params.min_edge_by_type).map(([bt, v]) => (
-          <div key={bt} className="flex justify-between items-center py-1 text-sm">
-            <span className="text-[#9b9bb8]">{bt.replace('_', ' ')}</span>
-            <span className="text-[#9b6dff] font-mono">
-              {pct(v)}{delta(edgeDeltas[bt] ?? 0)}
-            </span>
-          </div>
-        ))}
-      </div>
+  const minComposite = params.min_composite_score ?? 50.0
 
-      {/* Min Prob */}
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Signal Filters */}
       <div className="bg-[#0d0d1a] rounded-lg p-4 border border-[#1e1e3a]">
-        <div className="text-xs text-[#6b6b8a] uppercase tracking-wider mb-3">Min Prob by Type</div>
+        <div className="text-xs text-[#6b6b8a] uppercase tracking-wider mb-3">Signal Filters</div>
+
+        {/* Min Composite Score */}
+        <div className="flex justify-between items-center py-1.5 text-sm border-b border-[#1e1e3a] mb-2">
+          <span className="text-[#c9c9e3] font-medium">Min Composite Score</span>
+          <span className="text-[#9b6dff] font-mono font-bold">{minComposite.toFixed(1)}</span>
+        </div>
+
+        {/* Min Prob by Type */}
+        <div className="text-[10px] text-[#6b6b8a] uppercase tracking-wider mt-3 mb-1">
+          Min Probability by Type
+        </div>
         {Object.entries(params.min_prob_by_type).map(([bt, v]) => (
           <div key={bt} className="flex justify-between items-center py-1 text-sm">
             <span className="text-[#9b9bb8]">{bt.replace('_', ' ')}</span>
             <span className="text-[#9b6dff] font-mono">{pct(v)}</span>
           </div>
         ))}
+
+        {/* Max Edge Cap */}
+        <div className="mt-3 pt-3 border-t border-[#1e1e3a] flex justify-between text-sm">
+          <span className="text-[#9b9bb8]">Max Edge Cap</span>
+          <span className="text-[#9b6dff] font-mono">{pct(params.max_edge)}</span>
+        </div>
       </div>
 
-      {/* Shrinkage Alpha */}
+      {/* Model Tuning */}
       <div className="bg-[#0d0d1a] rounded-lg p-4 border border-[#1e1e3a]">
-        <div className="text-xs text-[#6b6b8a] uppercase tracking-wider mb-3">Shrinkage Alpha</div>
+        <div className="text-xs text-[#6b6b8a] uppercase tracking-wider mb-3">Model Tuning</div>
+
+        {/* Shrinkage Alpha */}
+        <div className="text-[10px] text-[#6b6b8a] uppercase tracking-wider mb-1">
+          Shrinkage Alpha by Confidence
+        </div>
         {Object.entries(params.shrinkage_alpha_by_conf).map(([conf, v]) => (
           <div key={conf} className="flex justify-between items-center py-1 text-sm">
             <span className="text-[#9b9bb8]">{conf}</span>
@@ -348,9 +365,39 @@ function CurrentParamsCard({
             </span>
           </div>
         ))}
-        <div className="mt-3 pt-3 border-t border-[#1e1e3a] flex justify-between text-sm">
-          <span className="text-[#9b9bb8]">Max Edge Cap</span>
-          <span className="text-[#9b6dff] font-mono">{pct(params.max_edge)}</span>
+
+        {/* Enabled Bet Types */}
+        <div className="mt-3 pt-3 border-t border-[#1e1e3a]">
+          <div className="text-[10px] text-[#6b6b8a] uppercase tracking-wider mb-1.5">
+            Enabled Bet Types
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {params.enabled_bet_types.map((bt) => (
+              <span
+                key={bt}
+                className="text-xs px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-400"
+              >
+                {bt.replace('_', ' ')}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Enabled Confidence Levels */}
+        <div className="mt-3 pt-3 border-t border-[#1e1e3a]">
+          <div className="text-[10px] text-[#6b6b8a] uppercase tracking-wider mb-1.5">
+            Enabled Confidence Levels
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {params.enabled_confidence.map((conf) => (
+              <span
+                key={conf}
+                className="text-xs px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-400"
+              >
+                {conf}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -392,7 +439,6 @@ export default function AdaptiveTuning() {
       const res = await triggerRetune()
       setRetuneMsg(res.message)
       if (res.success) {
-        // Refresh data after retune
         await loadReport()
       }
     } catch (e: unknown) {
@@ -440,6 +486,15 @@ export default function AdaptiveTuning() {
 
       {report && !loading && (
         <>
+          {/* Composite score info note */}
+          <div className="rounded-xl p-4 border bg-[#1a2a3a] border-[#2a4a6a]">
+            <p className="text-sm text-[#a0c0e0]">
+              <strong className="text-[#c0d8f0]">Note:</strong> Signal generation uses a composite confidence score (0–100) as the primary filter.
+              Signals must meet the minimum composite threshold to emit. Component weights and the threshold
+              are shown in the Composite Score Overview below.
+            </p>
+          </div>
+
           {/* Status Banner */}
           <div
             className={`rounded-xl p-4 border ${
@@ -467,17 +522,19 @@ export default function AdaptiveTuning() {
             </div>
           </div>
 
+          {/* Composite Score Overview */}
+          <Card title="Composite Score Overview">
+            <CompositeScoreOverview
+              minScore={report.current_params.min_composite_score ?? 50.0}
+            />
+          </Card>
+
           {/* Performance by Bet Type */}
           <Card title="Performance by Bet Type">
             <BetTypeTable
               byBetType={report.by_bet_type}
               currentParams={report.current_params}
             />
-          </Card>
-
-          {/* Performance by Edge Range */}
-          <Card title="Performance by Edge Range">
-            <EdgeBucketTable byEdgeBucket={report.by_edge_bucket} />
           </Card>
 
           {/* Probability Calibration */}
@@ -497,15 +554,14 @@ export default function AdaptiveTuning() {
           <Card title={`Current Parameters (v${report.current_params.version})`}>
             <div className="mb-3 text-xs text-[#6b6b8a]">
               Last updated: {formatTs(report.current_params.updated_at)} • {report.current_params.sample_size} samples •{' '}
-              <span className={`${report.edge_deltas && Object.values(report.edge_deltas).some(v => v !== 0) ? 'text-yellow-400' : 'text-emerald-400'}`}>
-                {Object.values(report.edge_deltas).some(v => v !== 0)
+              <span className={`${report.alpha_deltas && Object.values(report.alpha_deltas).some(v => v !== 0) ? 'text-yellow-400' : 'text-emerald-400'}`}>
+                {Object.values(report.alpha_deltas).some(v => v !== 0)
                   ? 'Modified from defaults'
                   : 'At defaults'}
               </span>
             </div>
             <CurrentParamsCard
               params={report.current_params}
-              edgeDeltas={report.edge_deltas}
               alphaDeltas={report.alpha_deltas}
             />
           </Card>

@@ -83,8 +83,19 @@ class TelegramClient:
         else:
             ev_str = f"{ev_pct:.0f}%"
 
+        # Composite score indicator
+        cs = getattr(signal, 'composite_score', 0.0)
+        if cs >= 70:
+            cs_emoji = "🟢"
+        elif cs >= 50:
+            cs_emoji = "🟡"
+        else:
+            cs_emoji = "🔴"
+
         text = (
             f"🔥 BET | {bet_emoji} {signal.bet_type} — {signal.match_title}\n"
+            f"\n"
+            f"{cs_emoji} Composite Score: {cs:.0f}/100\n"
             f"\n"
             f"📈 Chance: ~{signal.model_prob:.0%}\n"
             f"\n"

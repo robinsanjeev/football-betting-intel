@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { AlertCircle, Microscope, ChevronDown, ExternalLink, TrendingUp } from 'lucide-react'
-import { fetchModelInsights } from '../api'
-import type { MatchInsight, FlaggedSignal } from '../types'
+import { fetchModelInsights, fetchAllOddsMovement } from '../api'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
+import type { MatchInsight, OddsMovement } from '../types'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -543,6 +544,79 @@ function MatchHeader({ insight }: { insight: MatchInsight }) {
   )
 }
 
+// ── Odds Movement section ──────────────────────────────────────────────────────
+
+function OddsMovementSection({ insight, oddsData }: { insight: MatchInsight; oddsData: Record<string, OddsMovement> }) {
+  // Find all market tickers from flagged signals and match markets
+  const relevantTickers = insight.flagged_signals.map((s) => s.market_ticker)
+  const movements = relevantTickers
+    .map((ticker) => oddsData[ticker])
+    .filter((m): m is OddsMovement => m != null && m.snapshots.length > 0)
+
+  if (movements.length === 0) {
+    return (
+      <Section title="Odds Movement">
+        <p className="text-xs text-[#6b6b8a]">No odds snapshots recorded yet. Trigger a snapshot from the API to start tracking line movement.</p>
+      </Section>
+    )
+  }
+
+  return (
+    <Section title="Odds Movement">
+      <p className="text-[10px] text-[#6b6b8a] mb-3">
+        Kalshi implied probability over time for flagged markets. Purple = Kalshi odds, Blue = Model probability.
+      </p>
+      <div className="space-y-4">
+        {movements.map((movement) => {
+          const chartData = movement.snapshots.map((s) => ({
+            time: new Date(s.snapshot_time).toLocaleTimeString('en-US', {
+              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+            }),
+            kalshi: Math.round(s.kalshi_implied_prob * 1000) / 10,
+            model: Math.round(s.model_prob * 1000) / 10,
+          }))
+
+          return (
+            <div key={movement.market_ticker} className="card-inset p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-mono text-[#a0a0c0]">{movement.market_ticker}</span>
+                <div className="flex items-center gap-2">
+                  {movement.is_persistent ? (
+                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-[#3ddc84]/15 text-[#3ddc84] border border-[#3ddc84]/25 font-semibold">
+                      PERSISTENT EDGE
+                    </span>
+                  ) : movement.is_new ? (
+                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-[#f5a623]/15 text-[#f5a623] border border-[#f5a623]/25 font-semibold">
+                      NEW
+                    </span>
+                  ) : null}
+                  <span className="text-[10px] text-[#6b6b8a]">{movement.total_snapshots} snapshot{movement.total_snapshots !== 1 ? 's' : ''}</span>
+                </div>
+              </div>
+              <div style={{ height: 150 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e1e3a" />
+                    <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#6b6b8a' }} />
+                    <YAxis tick={{ fontSize: 9, fill: '#6b6b8a' }} domain={['auto', 'auto']} unit="%" />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#16162a', border: '1px solid #2e2e5a', borderRadius: 8, fontSize: 11 }}
+                      labelStyle={{ color: '#a0a0c0' }}
+                    />
+                    <Line type="monotone" dataKey="kalshi" stroke="#9b6dff" strokeWidth={2} dot={false} name="Kalshi" />
+                    <Line type="monotone" dataKey="model" stroke="#5b8def" strokeWidth={2} dot={false} name="Model" />
+                    <Legend wrapperStyle={{ fontSize: 10 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </Section>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ModelInsights() {
@@ -551,6 +625,7 @@ export default function ModelInsights() {
   const [error, setError] = useState<string | null>(null)
   const [selectedMatch, setSelectedMatch] = useState<string | null>(null)
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [oddsData, setOddsData] = useState<Record<string, OddsMovement>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -567,6 +642,13 @@ export default function ModelInsights() {
       setMatches(sorted)
       if (sorted.length > 0 && !selectedMatch) {
         setSelectedMatch(sorted[0].match_title)
+      }
+      // Fetch odds movement data
+      try {
+        const oddsResp = await fetchAllOddsMovement()
+        setOddsData(oddsResp.markets || {})
+      } catch {
+        // Non-critical, just skip
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load model insights')
@@ -719,6 +801,7 @@ export default function ModelInsights() {
               <GoalDistributionSection insight={insight} />
               <MarketProbabilitiesSection insight={insight} />
               <FlaggedSignalsSection insight={insight} />
+              <OddsMovementSection insight={insight} oddsData={oddsData} />
             </div>
           )}
         </>

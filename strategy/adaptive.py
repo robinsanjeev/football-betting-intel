@@ -50,20 +50,22 @@ def _get_conn() -> sqlite3.Connection:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_MIN_EDGE_BY_TYPE: Dict[str, float] = {
-    "MONEYLINE": 0.08,
-    "OVER_UNDER": 0.08,
+    "MONEYLINE": 0.15,
+    "OVER_UNDER": 0.05,
     "BTTS": 0.08,
-    "SPREAD": 0.08,
-    "FIRST_HALF": 0.08,
+    "SPREAD": 0.10,
+    "FIRST_HALF": 0.10,
 }
 
 _DEFAULT_MIN_PROB_BY_TYPE: Dict[str, float] = {
-    "MONEYLINE": 0.15,
-    "OVER_UNDER": 0.15,
-    "BTTS": 0.15,
-    "SPREAD": 0.15,
-    "FIRST_HALF": 0.15,
+    "MONEYLINE": 0.45,
+    "OVER_UNDER": 0.50,
+    "BTTS": 0.45,
+    "SPREAD": 0.45,
+    "FIRST_HALF": 0.45,
 }
+
+_DEFAULT_MIN_COMPOSITE_SCORE: float = 50.0
 
 _DEFAULT_SHRINKAGE_ALPHA_BY_CONF: Dict[str, float] = {
     "HIGH": 0.7,
@@ -95,6 +97,7 @@ class AdaptiveParams:
     updated_at: str                             # ISO timestamp
     sample_size: int                            # how many settled trades this was based on
     version: int                                # increment each update
+    min_composite_score: float = _DEFAULT_MIN_COMPOSITE_SCORE  # minimum composite score to emit signal
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -113,6 +116,7 @@ class AdaptiveParams:
             updated_at=d.get("updated_at", datetime.now(tz=timezone.utc).isoformat()),
             sample_size=d.get("sample_size", 0),
             version=d.get("version", 0),
+            min_composite_score=d.get("min_composite_score", _DEFAULT_MIN_COMPOSITE_SCORE),
         )
 
     @classmethod
@@ -127,6 +131,7 @@ class AdaptiveParams:
             updated_at=datetime.now(tz=timezone.utc).isoformat(),
             sample_size=0,
             version=0,
+            min_composite_score=_DEFAULT_MIN_COMPOSITE_SCORE,
         )
 
 

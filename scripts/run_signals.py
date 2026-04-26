@@ -82,26 +82,27 @@ def _print_signals(signals: List[BettingSignal], top_n: int = 30) -> None:
 
     signals_to_show = signals[:top_n]
 
-    print(f"\n{'=' * 130}")
+    print(f"\n{'=' * 140}")
     print(
         f"  {'Match':<28} {'Comp':<12} {'Type':<12} "
-        f"{'Model%':>8} {'Kalshi%':>8} {'Edge':>8} {'EV/$':>8} "
+        f"{'Model%':>8} {'Kalshi%':>8} {'Edge':>8} {'CS':>5} "
         f"{'Conf':<8}  Description"
     )
-    print(f"{'=' * 130}")
+    print(f"{'=' * 140}")
 
     for s in signals_to_show:
         match_truncated = s.match_title[:28] if len(s.match_title) > 28 else s.match_title
+        cs = getattr(s, 'composite_score', 0.0)
         print(
             f"  {match_truncated:<28} {s.competition:<12} {s.bet_type:<12} "
             f"{s.model_prob:>8.1%} {s.kalshi_implied_prob:>8.1%} "
-            f"{s.edge:>8.3f} {s.ev_per_dollar:>8.4f} "
+            f"{s.edge:>8.3f} {cs:>5.0f} "
             f"{s.confidence:<8}  {s.description}"
         )
-        print(f"  {'':>28} {'':>12} {'':>12} {'':>8} {'':>8} {'':>8} {'':>8} {'':>8}  🔗 {s.kalshi_url}")
+        print(f"  {'':>28} {'':>12} {'':>12} {'':>8} {'':>8} {'':>8} {'':>5} {'':>8}  🔗 {s.kalshi_url}")
 
-    print(f"{'=' * 130}")
-    print(f"\n  Showing {len(signals_to_show)} of {len(signals)} total signal(s) with edge ≥ {signals[0].edge:.1%} min\n")
+    print(f"{'=' * 140}")
+    print(f"\n  Showing {len(signals_to_show)} of {len(signals)} total signal(s), sorted by composite score\n")
 
 
 def _ensure_telegram_sent_column(conn) -> None:  # type: ignore[type-arg]
@@ -234,18 +235,37 @@ def main() -> int:
                 );
             """)
 
+            # Ensure composite_score column exists
+            existing_cols = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(signal_history)").fetchall()
+            }
+            if "composite_score" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE signal_history ADD COLUMN composite_score REAL DEFAULT 0.0"
+                )
+                conn.commit()
+            if "score_breakdown" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE signal_history ADD COLUMN score_breakdown TEXT DEFAULT ''"
+                )
+                conn.commit()
+
             now_iso = datetime.now(tz=timezone.utc).isoformat()
             for sig in signals:
                 entry_cents = int(round(sig.kalshi_implied_prob * 100))
                 upside_cents = 100 - entry_cents
                 score = int(min(sig.edge * sig.model_prob * 400, 100))
+                cs = getattr(sig, 'composite_score', 0.0)
+                sb = getattr(sig, 'score_breakdown', '')
                 conn.execute("""
                     INSERT INTO signal_history (
                         generated_at, event_ticker, market_ticker, match_title,
                         competition, bet_type, description, model_prob,
                         kalshi_implied_prob, edge, confidence, reasoning,
-                        kalshi_url, entry_cents, upside_cents, score
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        kalshi_url, entry_cents, upside_cents, score,
+                        composite_score, score_breakdown
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(market_ticker) DO UPDATE SET
                         generated_at=excluded.generated_at,
                         model_prob=excluded.model_prob,
@@ -254,12 +274,14 @@ def main() -> int:
                         reasoning=excluded.reasoning,
                         entry_cents=excluded.entry_cents,
                         upside_cents=excluded.upside_cents,
-                        score=excluded.score
+                        score=excluded.score,
+                        composite_score=excluded.composite_score,
+                        score_breakdown=excluded.score_breakdown
                 """, (
                     now_iso, sig.event_ticker, sig.market_ticker, sig.match_title,
                     sig.competition, sig.bet_type, sig.description, sig.model_prob,
                     sig.kalshi_implied_prob, sig.edge, sig.confidence, sig.reasoning,
-                    sig.kalshi_url, entry_cents, upside_cents, score,
+                    sig.kalshi_url, entry_cents, upside_cents, score, cs, sb,
                 ))
             conn.commit()
             conn.close()

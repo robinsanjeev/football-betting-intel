@@ -25,6 +25,7 @@ from football_intel.api.models import (
     AccuracyResponse,
     AdaptiveParamsResponse,
     AdaptiveReportResponse,
+    AllOddsMovementResponse,
     CalibrationBucket,
     CalibrationPoint,
     CumulativePnLPoint,
@@ -34,6 +35,8 @@ from football_intel.api.models import (
     HealthResponse,
     MatchInsightResponse,
     ModelInsightsResponse,
+    OddsMovementResponse,
+    OddsSnapshotResponse,
     PerformanceResponse,
     Prob1X2,
     ProbOverUnder,
@@ -42,6 +45,7 @@ from football_intel.api.models import (
     ScorelineEntry,
     SignalResponse,
     SignalsListResponse,
+    SnapshotTriggerResponse,
     TeamStrengthData,
     TradeResponse,
     TradesListResponse,
@@ -454,6 +458,8 @@ def _run_full_pipeline() -> Dict[str, Any]:
             "home_crest": home_crest,
             "away_crest": away_crest,
             "league_emblem": league_emblem,
+            "composite_score": round(sig.composite_score, 1),
+            "score_breakdown": sig.score_breakdown,
         })
 
     return {
@@ -565,8 +571,11 @@ def signals_active() -> SignalsListResponse:
         finally:
             conn.close()
 
+    # Sort by composite_score descending for the API response
+    sorted_dicts = sorted(signal_dicts, key=lambda s: s.get("composite_score", 0), reverse=True)
+
     return SignalsListResponse(
-        signals=[SignalResponse(**s) for s in signal_dicts],
+        signals=[SignalResponse(**s) for s in sorted_dicts],
         generated_at=generated_at.isoformat(),
         total_matches_scanned=total_matches,
     )
@@ -740,6 +749,30 @@ def performance() -> PerformanceResponse:
 
     win_loss_counts = {"WIN": wins, "LOSE": losses, "PENDING": pending_trades}
 
+    # Compute avg composite score for winners vs losers from signal_history
+    avg_cs_winners = None
+    avg_cs_losers = None
+    try:
+        conn2 = _get_db_connection()
+        try:
+            # Check if composite_score column exists
+            cols = {r[1] for r in conn2.execute("PRAGMA table_info(signal_history)").fetchall()}
+            if "composite_score" in cols:
+                for outcome_val, attr_name in [("WIN", "winners"), ("LOSE", "losers")]:
+                    row = conn2.execute(
+                        "SELECT AVG(composite_score) as avg_cs FROM signal_history WHERE outcome = ?",
+                        (outcome_val,),
+                    ).fetchone()
+                    if row and row["avg_cs"] is not None:
+                        if attr_name == "winners":
+                            avg_cs_winners = round(row["avg_cs"], 1)
+                        else:
+                            avg_cs_losers = round(row["avg_cs"], 1)
+        finally:
+            conn2.close()
+    except Exception:
+        pass
+
     return PerformanceResponse(
         total_trades=total_trades,
         settled_trades=settled_trades,
@@ -752,6 +785,8 @@ def performance() -> PerformanceResponse:
         cumulative_pnl=cumulative_pnl,
         weekly_roi=weekly_roi,
         win_loss_counts=win_loss_counts,
+        avg_composite_score_winners=avg_cs_winners,
+        avg_composite_score_losers=avg_cs_losers,
     )
 
 
@@ -1074,6 +1109,8 @@ def model_insights() -> ModelInsightsResponse:
                         "entry_cents": entry_cents,
                         "upside_cents": 100 - entry_cents,
                         "score": int(min(sig.edge * sig.model_prob * 400, 100)),
+                        "composite_score": round(sig.composite_score, 1),
+                        "score_breakdown": sig.score_breakdown,
                     })
 
                 match_insights.append(
@@ -1160,6 +1197,7 @@ def _build_adaptive_params_response(params_dict: dict) -> AdaptiveParamsResponse
         updated_at=params_dict["updated_at"],
         sample_size=params_dict["sample_size"],
         version=params_dict["version"],
+        min_composite_score=params_dict.get("min_composite_score", 50.0),
     )
 
 
@@ -1239,6 +1277,124 @@ def adaptive_retune() -> RetuneResponse:
             status_code=503,
             detail=f"Retune error: {exc}",
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Odds Movement / Snapshot endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/odds-movement/{market_ticker}", response_model=OddsMovementResponse)
+def odds_movement_for_market(market_ticker: str) -> OddsMovementResponse:
+    """Return odds movement history for a specific market."""
+    try:
+        from football_intel.ingestion.odds_tracker import OddsTracker
+        tracker = OddsTracker()
+        snapshots = tracker.get_snapshots_for_market(market_ticker)
+        status = tracker.get_persistence_status(market_ticker)
+        return OddsMovementResponse(
+            market_ticker=market_ticker,
+            snapshots=[
+                OddsSnapshotResponse(
+                    id=s.id,
+                    market_ticker=s.market_ticker,
+                    snapshot_time=s.snapshot_time,
+                    kalshi_implied_prob=s.kalshi_implied_prob,
+                    model_prob=s.model_prob,
+                    edge=s.edge,
+                )
+                for s in snapshots
+            ],
+            total_snapshots=status["total_snapshots"],
+            positive_snapshots=status["positive_snapshots"],
+            is_persistent=status["is_persistent"],
+            is_new=status["is_new"],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Odds movement error: {exc}") from exc
+
+
+@app.get("/api/odds-movement", response_model=AllOddsMovementResponse)
+def odds_movement_all() -> AllOddsMovementResponse:
+    """Return odds movement for all tracked markets."""
+    try:
+        from football_intel.ingestion.odds_tracker import OddsTracker
+        tracker = OddsTracker()
+        all_snapshots = tracker.get_all_snapshots()
+
+        # Group by market_ticker
+        by_market: Dict[str, list] = {}
+        for s in all_snapshots:
+            by_market.setdefault(s.market_ticker, []).append(s)
+
+        markets: Dict[str, OddsMovementResponse] = {}
+        for ticker, snaps in by_market.items():
+            status = tracker.get_persistence_status(ticker)
+            # Sort ascending for display
+            snaps.sort(key=lambda x: x.snapshot_time)
+            markets[ticker] = OddsMovementResponse(
+                market_ticker=ticker,
+                snapshots=[
+                    OddsSnapshotResponse(
+                        id=s.id,
+                        market_ticker=s.market_ticker,
+                        snapshot_time=s.snapshot_time,
+                        kalshi_implied_prob=s.kalshi_implied_prob,
+                        model_prob=s.model_prob,
+                        edge=s.edge,
+                    )
+                    for s in snaps
+                ],
+                total_snapshots=status["total_snapshots"],
+                positive_snapshots=status["positive_snapshots"],
+                is_persistent=status["is_persistent"],
+                is_new=status["is_new"],
+            )
+
+        return AllOddsMovementResponse(markets=markets)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Odds movement error: {exc}") from exc
+
+
+@app.post("/api/odds/snapshot", response_model=SnapshotTriggerResponse)
+def trigger_odds_snapshot() -> SnapshotTriggerResponse:
+    """Trigger a manual odds snapshot for all current pipeline markets."""
+    try:
+        from football_intel.ingestion.odds_tracker import OddsTracker
+        from football_intel.strategy.signal_generator import _get_model_prob_for_market
+
+        pipeline = _get_cached_pipeline()
+        model = pipeline["model"]
+        matches = pipeline["matches"]
+
+        market_data = []
+        for match in matches:
+            try:
+                prediction = model.predict_from_kalshi_match(match)
+            except Exception:
+                continue
+
+            for mkt in match.markets:
+                if mkt.implied_prob_yes is None or mkt.implied_prob_yes <= 0:
+                    continue
+                result = _get_model_prob_for_market(mkt, prediction)
+                if result is None:
+                    continue
+                model_prob, _ = result
+                market_data.append(
+                    (mkt.market_ticker, mkt.implied_prob_yes, model_prob)
+                )
+
+        tracker = OddsTracker()
+        count = tracker.take_snapshot(market_data)
+
+        return SnapshotTriggerResponse(
+            success=True,
+            message=f"Recorded {count} odds snapshots.",
+            snapshots_recorded=count,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Snapshot error: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { RefreshCw, AlertCircle, Zap, TrendingUp, Target, BarChart3, Filter } from 'lucide-react'
-import { fetchActiveSignals } from '../api'
+import { RefreshCw, AlertCircle, Zap, TrendingUp, Target, BarChart3, Filter, HelpCircle, X } from 'lucide-react'
+import { fetchActiveSignals, fetchAllOddsMovement } from '../api'
 import SignalCard from '../components/SignalCard'
 import type { Signal } from '../types'
 
@@ -10,6 +10,7 @@ const BET_TYPES = ['ALL', 'MONEYLINE', 'OVER_UNDER', 'SPREAD', 'BTTS', 'FIRST_HA
 const COMPETITIONS = ['ALL', 'EPL', 'Bundesliga', 'UCL'] as const
 const CONFIDENCE_LEVELS = ['ALL', 'HIGH', 'MEDIUM', 'LOW'] as const
 const SORT_OPTIONS = [
+  { label: 'Composite Score', value: 'composite_score' },
   { label: 'Highest Edge', value: 'edge' },
   { label: 'Highest Score', value: 'score' },
   { label: 'Highest Prob', value: 'model_prob' },
@@ -88,6 +89,75 @@ function FilterPill({ label, active, onClick }: { label: string; active: boolean
   )
 }
 
+function ScoreExplainer() {
+  const [open, setOpen] = useState(false)
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 mb-4 text-[11px] text-[#6b6b8a] hover:text-[#a0a0c0] transition-colors"
+      >
+        <HelpCircle size={13} />
+        <span>How do signals work?</span>
+      </button>
+    )
+  }
+
+  return (
+    <div className="card p-5 mb-6 relative">
+      <button
+        onClick={() => setOpen(false)}
+        className="absolute top-3 right-3 text-[#6b6b8a] hover:text-[#a0a0c0] transition-colors"
+      >
+        <X size={14} />
+      </button>
+      <h3 className="text-sm font-semibold text-[#e2e2f0] mb-3 flex items-center gap-2">
+        <HelpCircle size={14} className="text-[#9b6dff]" />
+        Understanding Signals
+      </h3>
+      <div className="space-y-3 text-[12px] text-[#a0a0c0] leading-relaxed">
+        <div>
+          <span className="text-[#e2e2f0] font-semibold">Composite Score</span>
+          <span className="mx-1.5 text-[#9b6dff]">0–100</span>
+          — The main number. Higher = stronger signal. Combines five factors:
+          <ul className="mt-1 ml-4 space-y-0.5 list-disc text-[11px]">
+            <li><span className="text-[#e2e2f0]">Model Confidence (40%)</span> — How sure is our model about this outcome?</li>
+            <li><span className="text-[#e2e2f0]">Data Quality (20%)</span> — How many historical matches back the prediction?</li>
+            <li><span className="text-[#e2e2f0]">Edge (15%)</span> — Gap between our model and the market price</li>
+            <li><span className="text-[#e2e2f0]">Market Alignment (15%)</span> — Are odds trending toward our prediction?</li>
+            <li><span className="text-[#e2e2f0]">Bet Type Bonus (10%)</span> — Our model is structurally better at some bet types (e.g. goal totals)</li>
+          </ul>
+          <div className="flex gap-3 mt-1.5 text-[10px]">
+            <span className="text-[#3ddc84]">● 70+ Strong</span>
+            <span className="text-[#f5a623]">● 50–69 Moderate</span>
+            <span className="text-[#e84040]">● &lt;50 Filtered out</span>
+          </div>
+        </div>
+        <div>
+          <span className="text-[#e2e2f0] font-semibold">Badges</span>
+          <div className="mt-1 ml-4 space-y-0.5 text-[11px]">
+            <div><span className="text-[#3ddc84]">🛡 Persistent</span> — Edge has held across multiple odds snapshots (more reliable)</div>
+            <div><span className="text-[#f5a623]">✨ New</span> — First time we've spotted this edge (wait for confirmation or act with caution)</div>
+            <div><span className="text-[#3ddc84]">STRONG</span> — Edge ≥ 20% between model and market</div>
+            <div><span className="text-[#9b6dff]">LEAN</span> — Positive edge but under 20%</div>
+          </div>
+        </div>
+        <div>
+          <span className="text-[#e2e2f0] font-semibold">Key Metrics</span>
+          <div className="mt-1 ml-4 space-y-0.5 text-[11px]">
+            <div><span className="text-[#e2e2f0]">Model vs Market</span> — Our Poisson model probability vs Kalshi's implied odds</div>
+            <div><span className="text-[#e2e2f0]">Entry</span> — Cost in cents to buy a Yes contract on Kalshi</div>
+            <div><span className="text-[#e2e2f0]">Upside</span> — Profit in cents if the bet wins (contracts pay out 100¢)</div>
+            <div><span className="text-[#e2e2f0]">Confidence</span> — HIGH/MEDIUM/LOW based on historical data volume for both teams</div>
+          </div>
+        </div>
+        <p className="text-[10px] text-[#6b6b8a] italic">Signals require positive edge and ≥45% model confidence. This is paper trading — no real money at risk.</p>
+      </div>
+    </div>
+  )
+}
+
 export default function ActiveSignals() {
   const [signals, setSignals] = useState<Signal[]>([])
   const [generatedAt, setGeneratedAt] = useState<string | null>(null)
@@ -100,7 +170,7 @@ export default function ActiveSignals() {
   const [betType, setBetType] = useState<string>('ALL')
   const [competition, setCompetition] = useState<string>('ALL')
   const [confidence, setConfidence] = useState<string>('ALL')
-  const [sortBy, setSortBy] = useState<SortOption>('edge')
+  const [sortBy, setSortBy] = useState<SortOption>('composite_score')
   const [showFilters, setShowFilters] = useState(false)
 
   const load = useCallback(async (silent = false) => {
@@ -109,7 +179,23 @@ export default function ActiveSignals() {
     setError(null)
     try {
       const data = await fetchActiveSignals()
-      setSignals(data.signals)
+      // Enrich signals with odds persistence data
+      let enrichedSignals = data.signals
+      try {
+        const oddsResp = await fetchAllOddsMovement()
+        const markets = oddsResp.markets || {}
+        enrichedSignals = data.signals.map((s) => {
+          const movement = markets[s.market_ticker]
+          return {
+            ...s,
+            is_persistent_edge: movement?.is_persistent ?? false,
+            is_new_signal: movement?.is_new ?? true,
+          }
+        })
+      } catch {
+        // Non-critical
+      }
+      setSignals(enrichedSignals)
       setGeneratedAt(data.generated_at)
       setTotalScanned(data.total_matches_scanned)
     } catch (err) {
@@ -135,11 +221,12 @@ export default function ActiveSignals() {
 
     result.sort((a, b) => {
       switch (sortBy) {
+        case 'composite_score': return (b.composite_score ?? 0) - (a.composite_score ?? 0)
         case 'edge': return b.edge - a.edge
         case 'score': return b.score - a.score
         case 'model_prob': return b.model_prob - a.model_prob
         case 'entry': return a.entry_cents - b.entry_cents
-        default: return b.edge - a.edge
+        default: return (b.composite_score ?? 0) - (a.composite_score ?? 0)
       }
     })
     return result
@@ -203,6 +290,9 @@ export default function ActiveSignals() {
           </button>
         </div>
       </div>
+
+      {/* How it works explainer */}
+      {!loading && !error && signals.length > 0 && <ScoreExplainer />}
 
       {/* Summary cards */}
       {!loading && !error && signals.length > 0 && (

@@ -31,6 +31,8 @@ class Signal(BaseModel):
     home_crest: str = ""    # URL to home team crest image
     away_crest: str = ""    # URL to away team crest image
     league_emblem: str = "" # URL to league/competition emblem
+    composite_score: float = 0.0     # 0-100 composite score (confidence-centric)
+    score_breakdown: str = ""        # human-readable breakdown
 
 
 class SignalResponse(Signal):
@@ -118,6 +120,8 @@ class PerformanceResponse(BaseModel):
     cumulative_pnl: List[CumulativePnLPoint]
     weekly_roi: List[WeeklyROIPoint]
     win_loss_counts: Dict[str, int]
+    avg_composite_score_winners: Optional[float] = None
+    avg_composite_score_losers: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +267,7 @@ class AdaptiveParamsResponse(BaseModel):
     updated_at: str
     sample_size: int
     version: int
+    min_composite_score: float = 50.0
 
 
 class AdaptiveReportResponse(BaseModel):
@@ -291,3 +296,39 @@ class RetuneResponse(BaseModel):
     new_params: Optional[AdaptiveParamsResponse] = None
     total_settled: int
     version: int
+
+
+# ---------------------------------------------------------------------------
+# Odds Snapshots / Movement
+# ---------------------------------------------------------------------------
+
+class OddsSnapshotResponse(BaseModel):
+    """A single odds snapshot for a market."""
+    id: Optional[int] = None
+    market_ticker: str
+    snapshot_time: str
+    kalshi_implied_prob: float
+    model_prob: float
+    edge: float
+
+
+class OddsMovementResponse(BaseModel):
+    """Odds movement history for a specific market."""
+    market_ticker: str
+    snapshots: List[OddsSnapshotResponse]
+    total_snapshots: int
+    positive_snapshots: int
+    is_persistent: bool
+    is_new: bool
+
+
+class AllOddsMovementResponse(BaseModel):
+    """Odds movement for all tracked markets."""
+    markets: Dict[str, OddsMovementResponse]
+
+
+class SnapshotTriggerResponse(BaseModel):
+    """Response from POST /api/odds/snapshot."""
+    success: bool
+    message: str
+    snapshots_recorded: int

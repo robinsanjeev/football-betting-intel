@@ -14,7 +14,7 @@ EV per dollar formula (for a Kalshi Yes contract at price P):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from football_intel.common.logging_utils import get_logger
 from football_intel.ingestion.kalshi_soccer import SoccerMarket, SoccerMatch
@@ -50,6 +50,9 @@ class BettingSignal:
     # ── New calibration fields (added for better risk management) ──────
     raw_model_prob: float = 0.0   # original model prob before market shrinkage
     suggested_fraction: float = 1.0  # recommended bet fraction: HIGH=1.0, MED=0.5, LOW=0.25
+    # ── Composite score fields (confidence-centric scoring) ───────────
+    composite_score: float = 0.0      # 0-100 composite score
+    score_breakdown: str = ""          # human-readable: "Confidence: 35/40, Data: 15/20, ..."
 
 
 # ---------------------------------------------------------------------------
@@ -208,11 +211,37 @@ def _get_model_prob_for_market(
 # Main generator class
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Per-type fallback defaults (used when adaptive params are not loaded)
+# These mirror _DEFAULT_MIN_EDGE_BY_TYPE in adaptive.py
+# ---------------------------------------------------------------------------
+
+_FALLBACK_MIN_EDGE_BY_TYPE: Dict[str, float] = {
+    "MONEYLINE": 0.15,
+    "OVER_UNDER": 0.05,
+    "BTTS": 0.08,
+    "SPREAD": 0.10,
+    "FIRST_HALF": 0.10,
+}
+
+_FALLBACK_MIN_PROB_BY_TYPE: Dict[str, float] = {
+    "MONEYLINE": 0.15,
+    "OVER_UNDER": 0.10,
+    "BTTS": 0.15,
+    "SPREAD": 0.15,
+    "FIRST_HALF": 0.15,
+}
+
+
 class SignalGenerator:
     """Compare model predictions against Kalshi prices to find +EV bets.
 
     Args:
         model: A calibrated CalibratedPoissonModel instance.
+        min_longshot_prob: Minimum Kalshi implied probability for MONEYLINE bets.
+            Bets where the market prices the team below this threshold are
+            rejected as longshots. Default 0.25 (odds > 4:1).
+        odds_tracker: Optional OddsTracker instance for edge-persistence checks.
     """
 
     # Maximum credible edge — signals beyond this are almost certainly model error
@@ -220,8 +249,15 @@ class SignalGenerator:
     # Bet-sizing fractions by confidence tier
     _SIZING = {"HIGH": 1.0, "MEDIUM": 0.5, "LOW": 0.25}
 
-    def __init__(self, model: CalibratedPoissonModel) -> None:
+    def __init__(
+        self,
+        model: CalibratedPoissonModel,
+        min_longshot_prob: float = 0.25,
+        odds_tracker: Optional[object] = None,
+    ) -> None:
         self.model = model
+        self.min_longshot_prob = min_longshot_prob
+        self.odds_tracker = odds_tracker
         self._adaptive_params = None
         self.reload_adaptive_params()
 
@@ -292,8 +328,8 @@ class SignalGenerator:
                       Default 0.08 = 8%.
 
         Returns:
-            List of BettingSignal objects where edge > min_edge, sorted by
-            ev_per_dollar descending.
+            List of BettingSignal objects passing composite score threshold,
+            sorted by composite_score descending.
         """
         all_signals: List[BettingSignal] = []
 
@@ -322,8 +358,8 @@ class SignalGenerator:
             )
             all_signals.extend(signals)
 
-        # Sort by EV descending
-        all_signals.sort(key=lambda s: s.ev_per_dollar, reverse=True)
+        # Sort by composite score descending (confidence-centric)
+        all_signals.sort(key=lambda s: s.composite_score, reverse=True)
         return all_signals
 
     # ------------------------------------------------------------------
@@ -334,11 +370,35 @@ class SignalGenerator:
     def _generate_reasoning(signal: BettingSignal) -> str:
         """Generate a qualitative explanation for a BettingSignal.
 
-        Includes shrinkage notes, edge-cap warnings, and sizing hints.
+        Leads with confidence narrative, includes composite score breakdown.
         """
         parts: List[str] = []
 
-        # ── Confidence prefix ──────────────────────────────────────────
+        # ── Composite score lead ───────────────────────────────────────
+        cs = signal.composite_score
+        if cs >= 75:
+            parts.append(f"Composite score {cs:.0f}/100 — strong signal.")
+        elif cs >= 60:
+            parts.append(f"Composite score {cs:.0f}/100 — solid opportunity.")
+        elif cs >= 50:
+            parts.append(f"Composite score {cs:.0f}/100 — borderline; proceed with caution.")
+        else:
+            parts.append(f"Composite score {cs:.0f}/100 — weak signal.")
+
+        if signal.score_breakdown:
+            parts.append(f"[{signal.score_breakdown}]")
+
+        # ── Model confidence (the primary narrative) ───────────────────
+        if signal.model_prob >= 0.60:
+            parts.append(f"Model confidence: {signal.model_prob:.0%} — strong favourite.")
+        elif signal.model_prob >= 0.50:
+            parts.append(f"Model confidence: {signal.model_prob:.0%} — clear lean.")
+        elif signal.model_prob >= 0.45:
+            parts.append(f"Model confidence: {signal.model_prob:.0%} — modest conviction.")
+        else:
+            parts.append(f"Model confidence: {signal.model_prob:.0%} — lower certainty.")
+
+        # ── Data quality prefix ────────────────────────────────────────
         if signal.confidence == "HIGH":
             parts.append("Strong historical data backs this pick.")
         elif signal.confidence == "MEDIUM":
@@ -379,18 +439,7 @@ class SignalGenerator:
                 f"vs market {signal.kalshi_implied_prob:.0%}."
             )
 
-        # ── Win probability context ──────────────────────────────────
-        if signal.model_prob >= 0.60:
-            parts.append(f"Win likelihood: {signal.model_prob:.0%} — strong favourite.")
-        elif signal.model_prob >= 0.40:
-            parts.append(f"Win likelihood: {signal.model_prob:.0%} — competitive odds.")
-        elif signal.model_prob >= 0.25:
-            parts.append(f"Win likelihood: {signal.model_prob:.0%} — moderate risk.")
-        else:
-            parts.append(f"Win likelihood: {signal.model_prob:.0%} — higher risk, bet small.")
-
         # ── Edge commentary ────────────────────────────────────────────
-        # Note: signal.edge is already capped at _MAX_EDGE
         raw_edge = signal.model_prob - signal.kalshi_implied_prob
         if raw_edge > SignalGenerator._MAX_EDGE:
             parts.append(
@@ -411,6 +460,98 @@ class SignalGenerator:
 
         return " ".join(parts)
 
+    # ------------------------------------------------------------------
+    # Composite score computation
+    # ------------------------------------------------------------------
+
+    def _compute_composite_score(
+        self,
+        model_prob: float,
+        confidence: str,
+        edge: float,
+        bet_type: str,
+        market_ticker: str,
+        home_matches: int,
+        away_matches: int,
+    ) -> Tuple[float, str]:
+        """Compute a 0-100 composite score weighing multiple factors.
+
+        Components:
+          - Model confidence (40%): Higher model_prob = higher score
+          - Data quality   (20%): Based on matches_played for both teams
+          - Edge value     (15%): Positive edge contribution
+          - Market alignment (15%): Odds moving toward our prediction
+          - Bet type bonus (10%): Structural bonus for Poisson-friendly bets
+
+        Returns:
+            (composite_score, breakdown_string)
+        """
+        # ── 1. Model confidence (0-40) ─────────────────────────────────
+        # Scale: 0.45 → ~20, 0.60 → ~30, 0.75+ → ~38-40
+        # Use a curve that rewards higher confidence strongly
+        conf_raw = min(model_prob, 0.85)  # cap to avoid overweighting
+        confidence_score = round((conf_raw / 0.85) * 40.0, 1)
+
+        # ── 2. Data quality (0-20) ─────────────────────────────────────
+        min_matches = min(home_matches, away_matches)
+        if min_matches >= 20:
+            data_score = 20.0
+        elif min_matches >= 15:
+            data_score = 16.0
+        elif min_matches >= 10:
+            data_score = 12.0
+        elif min_matches >= 5:
+            data_score = 8.0
+        else:
+            data_score = 4.0
+
+        # ── 3. Edge value (0-15) ───────────────────────────────────────
+        # Scale: edge 0.01 → ~1, edge 0.10 → ~10, edge 0.20+ → ~14-15
+        capped_edge = min(edge, 0.25)
+        edge_score = round(min((capped_edge / 0.20) * 15.0, 15.0), 1)
+
+        # ── 4. Market alignment (0-15) ─────────────────────────────────
+        # Check if odds have been moving toward our prediction
+        market_score = 7.5  # neutral default (no data)
+        if self.odds_tracker is not None:
+            try:
+                from football_intel.ingestion.odds_tracker import OddsTracker
+                if isinstance(self.odds_tracker, OddsTracker):
+                    status = self.odds_tracker.get_persistence_status(market_ticker)
+                    total_snaps = status.get("total_snapshots", 0)
+                    positive_snaps = status.get("positive_snapshots", 0)
+                    if total_snaps >= 2:
+                        ratio = positive_snaps / total_snaps
+                        market_score = round(ratio * 15.0, 1)
+                    # else: keep neutral 7.5 (no history yet)
+            except (ImportError, Exception):
+                pass  # keep default
+
+        # ── 5. Bet type bonus (0-10) ───────────────────────────────────
+        # Poisson model excels at totals; decent at MONEYLINE with high prob
+        _type_bonus = {
+            "OVER_UNDER": 10.0,
+            "BTTS": 7.0,
+            "MONEYLINE": 5.0,
+            "SPREAD": 4.0,
+            "FIRST_HALF": 3.0,
+        }
+        type_score = _type_bonus.get(bet_type, 3.0)
+
+        # ── Total ──────────────────────────────────────────────────────
+        total = confidence_score + data_score + edge_score + market_score + type_score
+        total = round(min(total, 100.0), 1)
+
+        breakdown = (
+            f"Confidence: {confidence_score:.0f}/40, "
+            f"Data: {data_score:.0f}/20, "
+            f"Edge: {edge_score:.0f}/15, "
+            f"Market: {market_score:.0f}/15, "
+            f"Type: {type_score:.0f}/10"
+        )
+
+        return total, breakdown
+
     def _match_prediction_to_signals(
         self,
         match: SoccerMatch,
@@ -421,10 +562,12 @@ class SignalGenerator:
     ) -> List[BettingSignal]:
         """For a single match, compare each Kalshi market to the model.
 
+        Uses confidence-centric composite scoring instead of edge-only filtering.
+
         Args:
             match: SoccerMatch with all its markets.
             prediction: The model's MatchPrediction for this fixture.
-            min_edge: Minimum edge threshold (used as fallback).
+            min_edge: Minimum edge threshold (kept for backward compat, not primary filter).
             allowed_confidence: Set of confidence levels to include.
             allowed_bet_types: Set of bet types to include.
 
@@ -443,6 +586,21 @@ class SignalGenerator:
         # Skip if confidence level is disabled by adaptive params
         if conf not in allowed_confidence:
             return signals
+
+        # Determine minimum composite score threshold
+        if self._adaptive_params is not None and hasattr(self._adaptive_params, 'min_composite_score'):
+            min_composite = self._adaptive_params.min_composite_score
+        else:
+            min_composite = 50.0  # fallback default
+
+        # Hard filter probability minimums (confidence-centric)
+        _HARD_MIN_PROB = {
+            "MONEYLINE": 0.45,
+            "OVER_UNDER": 0.50,
+            "BTTS": 0.45,
+            "SPREAD": 0.45,
+            "FIRST_HALF": 0.45,
+        }
 
         for market in match.markets:
             # Skip markets with no Kalshi price
@@ -465,34 +623,56 @@ class SignalGenerator:
 
             edge = model_prob - kalshi_p
 
-            # ── Per-type min_edge from adaptive params (fallback to arg) ─
-            if self._adaptive_params is not None:
-                effective_min_edge = self._adaptive_params.min_edge_by_type.get(
-                    market.bet_type, min_edge
-                )
-            else:
-                effective_min_edge = min_edge
+            # ══════════════════════════════════════════════════════════
+            # HARD FILTERS (reject immediately)
+            # ══════════════════════════════════════════════════════════
 
-            if edge <= effective_min_edge:
+            # 1. Edge must be > 0 (positive EV required)
+            if edge <= 0:
                 continue
 
-            # ── Minimum win probability filter (adaptive or hardcoded) ──
-            if self._adaptive_params is not None:
-                min_prob = self._adaptive_params.min_prob_by_type.get(
-                    market.bet_type, 0.15
+            # 2. Minimum model probability by bet type
+            hard_min = _HARD_MIN_PROB.get(market.bet_type, 0.45)
+            if model_prob < hard_min:
+                logger.debug(
+                    "Rejecting %s: model_prob %.3f < hard min %.2f for %s",
+                    description, model_prob, hard_min, market.bet_type,
                 )
-            else:
-                min_prob = 0.15
+                continue
 
-            if model_prob < min_prob:
+            # 3. Longshot filter for MONEYLINE: Kalshi implied prob >= 0.15
+            if market.bet_type == "MONEYLINE" and kalshi_p < 0.15:
+                logger.debug(
+                    "Rejecting longshot MONEYLINE %s (kalshi=%.2f < 0.15)",
+                    description, kalshi_p,
+                )
+                continue
+
+            # ══════════════════════════════════════════════════════════
+            # COMPOSITE SCORE
+            # ══════════════════════════════════════════════════════════
+
+            composite, breakdown = self._compute_composite_score(
+                model_prob=model_prob,
+                confidence=conf,
+                edge=edge,
+                bet_type=market.bet_type,
+                market_ticker=market.market_ticker,
+                home_matches=prediction.home_team_matches,
+                away_matches=prediction.away_team_matches,
+            )
+
+            if composite < min_composite:
+                logger.debug(
+                    "Rejecting %s: composite score %.1f < threshold %.1f",
+                    description, composite, min_composite,
+                )
                 continue
 
             # ── Edge cap (25%) ─────────────────────────────────────────
             edge_capped = min(edge, self._MAX_EDGE)
 
-            # EV per $1 on the Yes contract (probability-adjusted)
-            # Buy Yes at price P: win → profit (1-P), lose → lose P
-            # EV = model_prob * (1-P) - (1-model_prob) * P
+            # EV per $1 on the Yes contract
             ev_per_dollar = model_prob * (1.0 - kalshi_p) - (1.0 - model_prob) * kalshi_p
 
             # Build Kalshi URL
@@ -519,6 +699,8 @@ class SignalGenerator:
                 kalshi_odds=kalshi_odds,
                 raw_model_prob=raw_model_prob,
                 suggested_fraction=suggested_fraction,
+                composite_score=composite,
+                score_breakdown=breakdown,
             )
             signal.reasoning = self._generate_reasoning(signal)
             signals.append(signal)

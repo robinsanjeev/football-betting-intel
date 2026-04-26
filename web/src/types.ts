@@ -18,6 +18,11 @@ export interface Signal {
   home_crest: string;
   away_crest: string;
   league_emblem: string;
+  composite_score: number;
+  score_breakdown: string;
+  // Odds tracking fields (optional, populated client-side)
+  is_persistent_edge?: boolean;
+  is_new_signal?: boolean;
 }
 
 export interface Trade {
@@ -44,6 +49,8 @@ export interface Performance {
   cumulative_pnl: { date: string; pnl: number }[];
   weekly_roi: { week: string; roi: number }[];
   win_loss_counts: { WIN: number; LOSE: number; PENDING: number };
+  avg_composite_score_winners: number | null;
+  avg_composite_score_losers: number | null;
 }
 
 export interface Accuracy {
@@ -177,6 +184,7 @@ export interface AdaptiveParams {
   updated_at: string;
   sample_size: number;
   version: number;
+  min_composite_score: number;
 }
 
 export interface GroupStats {
@@ -223,4 +231,30 @@ export interface RetuneResponse {
   new_params: AdaptiveParams | null;
   total_settled: number;
   version: number;
+}
+
+// ---------------------------------------------------------------------------
+// Odds Movement / Snapshots
+// ---------------------------------------------------------------------------
+
+export interface OddsSnapshot {
+  id: number | null;
+  market_ticker: string;
+  snapshot_time: string;
+  kalshi_implied_prob: number;
+  model_prob: number;
+  edge: number;
+}
+
+export interface OddsMovement {
+  market_ticker: string;
+  snapshots: OddsSnapshot[];
+  total_snapshots: number;
+  positive_snapshots: number;
+  is_persistent: boolean;
+  is_new: boolean;
+}
+
+export interface AllOddsMovement {
+  markets: Record<string, OddsMovement>;
 }

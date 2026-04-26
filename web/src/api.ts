@@ -99,5 +99,26 @@ export async function triggerRetune(): Promise<import('./types').RetuneResponse>
   return res.json() as Promise<import('./types').RetuneResponse>
 }
 
+// ---------------------------------------------------------------------------
+// Odds Movement
+// ---------------------------------------------------------------------------
+
+export async function fetchOddsMovement(marketTicker: string): Promise<import('./types').OddsMovement> {
+  return apiFetch<import('./types').OddsMovement>(`/odds-movement/${encodeURIComponent(marketTicker)}`)
+}
+
+export async function fetchAllOddsMovement(): Promise<import('./types').AllOddsMovement> {
+  return apiFetch<import('./types').AllOddsMovement>('/odds-movement')
+}
+
+export async function triggerOddsSnapshot(): Promise<{ success: boolean; message: string; snapshots_recorded: number }> {
+  const res = await fetch('/api/odds/snapshot', { method: 'POST' })
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error')
+    throw new Error(`API error ${res.status}: ${text}`)
+  }
+  return res.json()
+}
+
 // Re-export types for convenience
 export type { Signal, Trade, Performance, Accuracy, ActiveSignalsResponse, ModelInsightsResponse, TradesResponse }

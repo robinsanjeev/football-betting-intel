@@ -277,7 +277,7 @@ export default function Documentation() {
                 ['Fetch match data', 'Historical results (last 12 months) are pulled from football-data.org and cached locally.'],
                 ['Calibrate model', 'A Poisson model is fitted to each team\'s attack and defense ratings, adjusted for home/away splits and recency.'],
                 ['Scan Kalshi markets', 'Live market prices are fetched for all EPL, Bundesliga, and UCL match contracts.'],
-                ['Generate signals', 'Matches where model probability exceeds market price by ≥5% are flagged as betting opportunities.'],
+                ['Generate signals', 'Each opportunity is scored on a composite scale (0-100) weighing model confidence, data quality, edge, market alignment, and bet type. Signals scoring ≥50 are surfaced as betting opportunities.'],
               ].map(([step, desc], i) => (
                 <Step key={i} n={i + 1}>
                   <strong className="text-[#e2e2f0]">{step}</strong> — {desc}
@@ -463,7 +463,7 @@ export default function Documentation() {
           </SubSection>
 
           <SubSection title="Recency weighting">
-            <p>Matches from 60+ days ago have half the weight of recent matches. This means the model responds to form shifts — a team that's been on a bad run will see its ratings drift down faster than if all history were treated equally.</p>
+            <p>Matches from 30+ days ago have half the weight of recent matches. This means the model responds quickly to form shifts.</p>
           </SubSection>
 
           <SubSection title="Key signal metrics explained">
@@ -472,7 +472,7 @@ export default function Documentation() {
                 ['Lambda (λ)', 'Expected goals for a team in this specific match. λ_home = 2.1 means the model expects the home side to score about 2 goals.'],
                 ['Edge', 'Model probability minus Kalshi market price. Edge = 22% means the model thinks the event is 22 percentage points more likely than the market does.'],
                 ['Confidence', 'Based on how many historical matches are in the database for both teams. HIGH = 20+ matches each. LOW = fewer than 10 matches.'],
-                ['Score (0–100)', 'Edge × 200, capped at 100. A quick single-number strength rating — the bigger the edge, the higher the score.'],
+                ['Score (0–100)', 'A composite confidence score weighing model confidence (40%), data quality (20%), edge value (15%), market alignment (15%), and bet type bonus (10%). Signals need a score ≥50 to appear. Higher = stronger, more reliable signal.'],
               ].map(([term, desc]) => (
                 <div key={term as string} className="card-inset p-2.5 rounded-lg">
                   <span className="text-[11px] font-semibold text-[#e2e2f0]">{term}</span>
@@ -487,10 +487,10 @@ export default function Documentation() {
         <SectionCard id="tabs" icon={Microscope} color="#5b8def" title="Dashboard Tabs">
           <div className="space-y-2">
             {[
-              [Zap, '#9b6dff', 'Active Signals', 'Current betting opportunities. Shows every match where the model finds ≥5% edge over the Kalshi market price. Cards update every 15 minutes. Click any card to go directly to the Kalshi market.'],
+              [Zap, '#9b6dff', 'Active Signals', 'Current betting opportunities ranked by composite confidence score. Each signal must pass hard filters (positive edge, ≥45% model confidence) and score ≥50 on the composite scale. Cards update every 15 minutes. Click any card to go directly to the Kalshi market.'],
               [TrendingUp, '#3ddc84', 'Performance', 'Win rate, ROI, cumulative PnL chart, max drawdown, and weekly breakdown. This is where you evaluate whether the model is actually making money over time.'],
-              [FileText, '#f5a623', 'Trade Log', 'Full history of every paper trade the system has logged — with timestamps, match details, stake, odds, and outcome. Filterable by status (pending / win / lose).'],
               [Microscope, '#5b8def', 'Model Insights', 'Deep-dive view per match: goal lambdas, team strength ratings, scoreline probability matrix, goal distribution chart, and all flagged signals for that game.'],
+              [Settings, '#f5a623', 'Adaptive Tuning', 'Automatic parameter optimization. Shows performance breakdowns by bet type, edge range, and confidence level. Includes calibration analysis and the ability to manually retune parameters.'],
               [BookOpen, '#9b6dff', 'Docs (this page)', 'Full documentation, glossary of betting terms, and deployment guide. You\'re here!'],
             ].map(([Icon, color, label, desc]) => (
               <div key={label as string} className="card-inset p-3 rounded-lg flex gap-3">
@@ -590,7 +590,7 @@ export default function Documentation() {
             {[
               ['"Missing config.yaml"', 'The app can\'t find its configuration. Copy the example file: cp config/config.yaml.example config/config.yaml — then fill in your API keys.'],
               ['"Kalshi auth failed" / 401 error', 'Check that kalshi.key_id matches the UUID on your Kalshi API Keys page, and that private_key_path points to the correct .key file. The path must be accessible inside the container (use the mounted volume path).'],
-              ['"No signals showing" on Active Signals', 'The model needs historical data before it can generate signals. On first run, it fetches ~12 months of match results which can take a minute. Signals also only appear when the model finds ≥5% edge over the current Kalshi market price — during quiet market periods there may be fewer opportunities.'],
+              ['"No signals showing" on Active Signals', 'The model needs historical data before it can generate signals. On first run, it fetches ~12 months of match results which can take a minute. Signals only appear when the model has ≥45% confidence in the outcome, finds positive edge, and the composite score exceeds 50 — during quiet market periods there may be fewer opportunities.'],
               ['Container won\'t start', 'Check the logs: docker logs football-intel. Common causes: missing config.yaml (it\'s gitignored), wrong volume paths, or a bad Kalshi key file.'],
               ['Dashboard shows "Pipeline error"', 'Usually a network issue fetching from Kalshi or football-data.org. Check your API keys are valid and that the container has internet access. Try docker logs football-intel for the full stack trace.'],
               ['TypeScript / build errors (manual setup)', 'Make sure you\'re running Node 20+ (check with node --version). Delete web/node_modules and run npm install again. If the issue persists, check the console output from npm run build.'],
@@ -706,7 +706,7 @@ export default function Documentation() {
               </GlossaryItem>
 
               <GlossaryItem term="Score (0–100)">
-                <p>A quick-glance signal strength rating. Calculated as <InlineCode>min(Edge × 200, 100)</InlineCode>. Higher = stronger disagreement with the market.</p>
+                <p>A composite confidence score weighing model confidence (40%), data quality (20%), edge value (15%), market alignment (15%), and bet type bonus (10%). Signals need a score ≥50 to appear. Higher = stronger, more reliable signal.</p>
               </GlossaryItem>
 
               <GlossaryItem term="Confidence Level">

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   TrendingUp, TrendingDown, BarChart2, DollarSign, AlertCircle,
-  Activity, ChevronDown, ChevronUp, Download,
+  Activity, ChevronDown, ChevronUp, Download, Target,
 } from 'lucide-react'
 import { fetchPerformance, fetchAccuracy, fetchTrades, fetchSignalHistory } from '../api'
 import type { SignalHistoryEntry } from '../api'
@@ -398,7 +398,7 @@ export default function PerformanceAccuracy() {
           )}
 
           {/* ── KPI Row (settled only) ── */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
             <MetricCard
               label="Settled Trades"
               value={settledStats.total}
@@ -440,6 +440,20 @@ export default function PerformanceAccuracy() {
               subValue="on settled trades"
               icon={<Activity size={14} />}
               trend={settledStats.avgEdge > 0.08 ? 'positive' : 'neutral'}
+            />
+            <MetricCard
+              label="Avg Score (Winners)"
+              value={perfData.avg_composite_score_winners != null ? perfData.avg_composite_score_winners.toFixed(1) : '—'}
+              icon={<Target size={14} />}
+              trend="positive"
+              valueColor="text-[#3ddc84]"
+            />
+            <MetricCard
+              label="Avg Score (Losers)"
+              value={perfData.avg_composite_score_losers != null ? perfData.avg_composite_score_losers.toFixed(1) : '—'}
+              icon={<Target size={14} />}
+              trend="negative"
+              valueColor="text-[#e84040]"
             />
           </div>
 

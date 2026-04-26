@@ -1,8 +1,50 @@
-import { ExternalLink } from 'lucide-react'
+import { useState } from 'react'
+import { ExternalLink, ShieldCheck, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
 import type { Signal } from '../types'
 
 interface SignalCardProps {
   signal: Signal
+}
+
+function getCompositeScoreColor(score: number): string {
+  if (score >= 70) return '#3ddc84'
+  if (score >= 50) return '#f5a623'
+  return '#e84040'
+}
+
+function CompositeScoreBadge({ score, breakdown }: { score: number; breakdown: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const color = getCompositeScoreColor(score)
+
+  return (
+    <div className="flex flex-col">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all hover:opacity-80"
+        style={{ background: `${color}15`, borderColor: `${color}30` }}
+        title={breakdown}
+      >
+        <span className="text-lg font-bold font-mono" style={{ color }}>
+          {score.toFixed(0)}
+        </span>
+        <span className="text-[9px] uppercase tracking-widest font-medium" style={{ color }}>
+          Score
+        </span>
+        {breakdown && (
+          expanded
+            ? <ChevronUp size={10} style={{ color }} />
+            : <ChevronDown size={10} style={{ color }} />
+        )}
+      </button>
+      {expanded && breakdown && (
+        <div className="mt-1.5 px-2 py-1.5 rounded text-[10px] text-[#a0a0c0] bg-[#0d0d1a] border border-[#1e1e3a] leading-relaxed">
+          {breakdown.split(', ').map((part, i) => (
+            <div key={i}>{part}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function getEdgeBadge(edge: number) {
@@ -63,6 +105,11 @@ export default function SignalCard({ signal }: SignalCardProps) {
 
   return (
     <div className="card p-5 flex flex-col gap-4 hover:border-[#2e2e5a] transition-colors glow-purple">
+      {/* Composite Score + Header */}
+      <div className="flex items-start justify-between gap-3">
+        <CompositeScoreBadge score={signal.composite_score ?? 0} breakdown={signal.score_breakdown ?? ''} />
+      </div>
+
       {/* Header with team crests */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -90,11 +137,22 @@ export default function SignalCard({ signal }: SignalCardProps) {
             </h3>
           </div>
         </div>
-        {getEdgeBadge(signal.edge)}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {signal.is_persistent_edge ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-[#3ddc84]/15 text-[#3ddc84] border border-[#3ddc84]/25">
+              <ShieldCheck size={10} /> Persistent
+            </span>
+          ) : signal.is_new_signal !== false ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-[#f5a623]/15 text-[#f5a623] border border-[#f5a623]/25">
+              <Sparkles size={10} /> New
+            </span>
+          ) : null}
+          {getEdgeBadge(signal.edge)}
+        </div>
       </div>
 
       {/* Metrics row */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] uppercase tracking-widest text-[#6b6b8a] font-medium">Entry</span>
           <span className="font-mono text-lg font-semibold text-[#9b6dff]">
@@ -105,12 +163,6 @@ export default function SignalCard({ signal }: SignalCardProps) {
           <span className="text-[10px] uppercase tracking-widest text-[#6b6b8a] font-medium">Upside</span>
           <span className="font-mono text-lg font-semibold text-[#3ddc84]">
             +{signal.upside_cents}¢
-          </span>
-        </div>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] uppercase tracking-widest text-[#6b6b8a] font-medium">Score</span>
-          <span className="font-mono text-lg font-semibold text-[#e2e2f0]">
-            {signal.score.toFixed(1)}
           </span>
         </div>
       </div>

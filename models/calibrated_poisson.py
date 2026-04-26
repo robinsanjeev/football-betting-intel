@@ -463,8 +463,8 @@ class CalibratedPoissonModel:
             return LeagueStats(avg_home_goals=1.5, avg_away_goals=1.2, team_strengths={})
 
         # ── Recency weight helper ────────────────────────────────────────
-        _HALF_LIFE_DAYS: float = 60.0
-        _DECAY: float = math.log(2) / _HALF_LIFE_DAYS  # = 0.693 / 60
+        _HALF_LIFE_DAYS: float = 30.0
+        _DECAY: float = math.log(2) / _HALF_LIFE_DAYS  # ≈ 0.693 / 30
         now = datetime.now(tz=timezone.utc)
 
         def _weight(match_date: Optional[datetime]) -> float:
