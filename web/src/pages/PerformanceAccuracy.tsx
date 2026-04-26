@@ -114,7 +114,7 @@ export default function PerformanceAccuracy() {
 
   // Use signal history as the primary data source for the table
   const enrichedTrades = useMemo(() => {
-    return signalHistory.map((s) => {
+    return signalHistory.filter((s) => s.bet_placed !== false).map((s) => {
       const stake = 10
       const odds = s.kalshi_implied_prob > 0 ? 1 / s.kalshi_implied_prob : 0
       const hypotheticalPnl = s.outcome === 'WIN'

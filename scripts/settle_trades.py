@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import os
+import re
 import sqlite3
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -59,22 +60,49 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def _load_pending_signals(conn: sqlite3.Connection, days: int) -> List[sqlite3.Row]:
-    """Return all PENDING signals generated within the last `days` days."""
+    """Return all PENDING signals generated within the last `days` days.
+
+    Only includes signals where bet_placed = 1 (passed composite score filters).
+    """
     cutoff = (dt.datetime.utcnow() - dt.timedelta(days=days)).isoformat()
     rows = conn.execute(
         """
         SELECT id, market_ticker, match_title, competition,
                bet_type, description, kalshi_implied_prob,
-               entry_cents, upside_cents
+               entry_cents, upside_cents, event_ticker
         FROM signal_history
         WHERE outcome = 'PENDING'
+          AND bet_placed = 1
           AND generated_at >= ?
         ORDER BY generated_at ASC
         """,
         (cutoff,),
     ).fetchall()
-    logger.info("Found %d PENDING signals (last %d days)", len(rows), days)
+    logger.info("Found %d PENDING bet_placed signals (last %d days)", len(rows), days)
     return rows
+
+
+def _parse_match_date(event_ticker, fallback_date):
+    # type: (str, str) -> str
+    """Extract match date from Kalshi event ticker.
+
+    Tickers contain dates like 26APR18 meaning 2026-04-18.
+    Falls back to the provided date string if parsing fails.
+    """
+    months = {
+        'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+        'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12,
+    }
+    m = re.search(
+        r'26(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})',
+        event_ticker or '',
+        re.IGNORECASE,
+    )
+    if m:
+        month = months.get(m.group(1).upper(), 4)
+        day = int(m.group(2))
+        return "2026-{:02d}-{:02d}".format(month, day)
+    return fallback_date[:10] if fallback_date else dt.date.today().isoformat()
 
 
 def _update_signal(
@@ -102,29 +130,70 @@ def _update_trades(
     outcome: str,
     pnl: float,
     dry_run: bool,
+    event_ticker: str = "",
+    generated_at: str = "",
 ) -> int:
-    """Update any PENDING trades matching this match + side.  Returns count updated."""
+    """Upsert a trade row and settle it.
+
+    Uses the match date parsed from event_ticker instead of generated_at.
+    Returns count of rows affected.
+    """
+    match_date = _parse_match_date(event_ticker, generated_at)
+
     if dry_run:
         logger.info(
-            "[DRY-RUN] Would update trades for match=%r desc=%r → %s (pnl=%.2f)",
-            match_title, description, outcome, pnl,
+            "[DRY-RUN] Would upsert trade for match=%r desc=%r → %s (pnl=%.2f, date=%s)",
+            match_title, description, outcome, pnl, match_date,
         )
         return 0
+
+    # Ensure trades table exists
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            match TEXT NOT NULL,
+            side TEXT NOT NULL,
+            stake REAL NOT NULL,
+            odds REAL,
+            result TEXT DEFAULT 'PENDING',
+            pnl REAL DEFAULT 0.0
+        )
+    """)
+
+    # Try to update an existing PENDING trade first
     cur = conn.execute(
         """
         UPDATE trades
-        SET result = ?, pnl = ?
+        SET result = ?, pnl = ?, timestamp = ?
         WHERE result = 'PENDING'
           AND match = ?
           AND side = ?
         """,
-        (outcome, pnl, match_title, description),
+        (outcome, pnl, match_date, match_title, description),
     )
     conn.commit()
     count = cur.rowcount
-    if count:
+
+    # If no existing row, insert a new settled trade
+    if count == 0:
+        conn.execute(
+            """
+            INSERT INTO trades (timestamp, match, side, stake, odds, result, pnl)
+            VALUES (?, ?, ?, ?, NULL, ?, ?)
+            """,
+            (match_date, match_title, description, STAKE, outcome, pnl),
+        )
+        conn.commit()
+        count = 1
         logger.debug(
-            "Updated %d trade row(s) for match=%r desc=%r", count, match_title, description
+            "Inserted settled trade for match=%r desc=%r date=%s",
+            match_title, description, match_date,
+        )
+    else:
+        logger.debug(
+            "Updated %d trade row(s) for match=%r desc=%r",
+            count, match_title, description,
         )
     return count
 
@@ -197,6 +266,7 @@ def settle_all(
         description  = row["description"]
         entry_cents  = row["entry_cents"]
         upside_cents = row["upside_cents"]
+        event_ticker = row["event_ticker"] if "event_ticker" in row.keys() else ""
 
         print(f"  Checking {ticker} ({match_title} — {description})…", flush=True)
 
@@ -241,7 +311,10 @@ def settle_all(
 
         # Persist
         _update_signal(conn, signal_id, outcome, pnl, dry_run)
-        _update_trades(conn, match_title, description, outcome, pnl, dry_run)
+        _update_trades(
+            conn, match_title, description, outcome, pnl, dry_run,
+            event_ticker=event_ticker,
+        )
 
         # Tally
         settled_count += 1

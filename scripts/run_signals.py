@@ -250,6 +250,11 @@ def main() -> int:
                     "ALTER TABLE signal_history ADD COLUMN score_breakdown TEXT DEFAULT ''"
                 )
                 conn.commit()
+            if "bet_placed" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE signal_history ADD COLUMN bet_placed INTEGER DEFAULT 0"
+                )
+                conn.commit()
 
             now_iso = datetime.now(tz=timezone.utc).isoformat()
             for sig in signals:
@@ -284,8 +289,41 @@ def main() -> int:
                     sig.kalshi_url, entry_cents, upside_cents, score, cs, sb,
                 ))
             conn.commit()
+
+            # Mark bet_placed based on composite score filters
+            for sig in signals:
+                passes = True
+                cs = getattr(sig, 'composite_score', 0.0)
+                bt = sig.bet_type
+                mp = sig.model_prob
+                kp = sig.kalshi_implied_prob
+                edge = sig.edge
+
+                # Hard filters
+                if edge <= 0:
+                    passes = False
+                elif bt == 'MONEYLINE' and (mp < 0.45 or kp < 0.15):
+                    passes = False
+                elif bt == 'OVER_UNDER' and mp < 0.50:
+                    passes = False
+                elif bt not in ('MONEYLINE', 'OVER_UNDER') and mp < 0.45:
+                    passes = False
+                elif cs < 50:
+                    passes = False
+
+                conn.execute(
+                    "UPDATE signal_history SET bet_placed = ? WHERE market_ticker = ?",
+                    (1 if passes else 0, sig.market_ticker)
+                )
+            conn.commit()
+
+            placed_count = sum(
+                1 for sig in signals
+                if getattr(sig, 'composite_score', 0.0) >= 50
+                and sig.edge > 0
+            )
             conn.close()
-            print(f"  ✓ {len(signals)} signal(s) recorded/updated")
+            print(f"  ✓ {len(signals)} signal(s) recorded/updated ({placed_count} marked as bet_placed)")
         except Exception as exc:
             print(f"  ✗ Failed to record signal history: {exc}")
 
