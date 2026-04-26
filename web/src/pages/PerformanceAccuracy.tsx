@@ -11,7 +11,7 @@ import type { Performance, Accuracy, Trade } from '../types'
 
 // ─── Results Table Types ────────────────────────────────────────────────────
 
-type SortKey = 'timestamp' | 'match' | 'bet_type' | 'model_prob' | 'implied_prob' | 'edge' | 'upside' | 'result' | 'pnl'
+type SortKey = 'timestamp' | 'match' | 'bet_type' | 'model_prob' | 'implied_prob' | 'edge' | 'upside' | 'result' | 'pnl' | 'composite_score'
 type SortDir = 'asc' | 'desc'
 type ResultFilter = 'ALL' | 'WIN' | 'LOSE' | 'PENDING'
 
@@ -144,6 +144,8 @@ export default function PerformanceAccuracy() {
         awayCrest: s.away_crest,
         actualPnl: s.actual_pnl,
         betPlaced: s.bet_placed ?? false,
+        compositeScore: s.composite_score ?? 0,
+        scoreBreakdown: s.score_breakdown ?? '',
       }
     })
   }, [signalHistory])
@@ -228,6 +230,7 @@ export default function PerformanceAccuracy() {
         case 'model_prob': return dir * (a.modelProb - b.modelProb)
         case 'implied_prob': return dir * (a.impliedProb - b.impliedProb)
         case 'edge': return dir * (a.edge - b.edge)
+        case 'composite_score': return dir * (a.compositeScore - b.compositeScore)
         case 'upside': return dir * (a.upsideCents - b.upsideCents)
         case 'result': return dir * a.result.localeCompare(b.result)
         case 'pnl': return dir * (a.pnl - b.pnl)
@@ -253,7 +256,7 @@ export default function PerformanceAccuracy() {
 
   // CSV export
   const exportCsv = () => {
-    const headers = ['Date', 'Match', 'Bet Type', 'Recommendation', 'Model %', 'Market %', 'Edge %', 'Upside ¢', 'Stake', 'Odds', 'Result', 'Actual PnL', 'Bet Placed', 'Hypothetical PnL']
+    const headers = ['Date', 'Match', 'Bet Type', 'Recommendation', 'Model %', 'Market %', 'Edge %', 'Composite Score', 'Upside ¢', 'Stake', 'Odds', 'Result', 'Actual PnL', 'Bet Placed', 'Hypothetical PnL']
     const rows = filteredTrades.map((t) => [
       new Date(t.timestamp).toLocaleDateString(),
       t.match,
@@ -262,6 +265,7 @@ export default function PerformanceAccuracy() {
       (t.modelProb * 100).toFixed(1),
       (t.impliedProb * 100).toFixed(1),
       (t.edge * 100).toFixed(1),
+      t.compositeScore.toFixed(0),
       t.upsideCents,
       t.stake.toFixed(2),
       t.odds.toFixed(2),
@@ -667,6 +671,7 @@ export default function PerformanceAccuracy() {
                       <SortableHeader label="Model %" sortKey="model_prob" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
                       <SortableHeader label="Market %" sortKey="implied_prob" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
                       <SortableHeader label="Edge" sortKey="edge" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+                      <SortableHeader label="Score" sortKey="composite_score" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
                       <SortableHeader label="Upside" sortKey="upside" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
                       <th className="px-3 py-2.5 text-left text-[10px] uppercase tracking-widest text-[#6b6b8a] font-medium whitespace-nowrap">Conf.</th>
                       <SortableHeader label="Result" sortKey="result" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
@@ -712,6 +717,11 @@ export default function PerformanceAccuracy() {
                         <td className="px-3 py-2.5 font-mono whitespace-nowrap">
                           <span className={t.edge > 0 ? 'text-[#3ddc84]' : 'text-[#e84040]'}>
                             {t.edge > 0 ? '+' : ''}{(t.edge * 100).toFixed(1)}%
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 font-mono whitespace-nowrap">
+                          <span className={t.compositeScore >= 70 ? 'text-[#3ddc84]' : t.compositeScore >= 50 ? 'text-[#f5a623]' : 'text-[#e84040]'}>
+                            {t.compositeScore.toFixed(0)}
                           </span>
                         </td>
                         <td className="px-3 py-2.5 font-mono text-[#3ddc84] whitespace-nowrap">

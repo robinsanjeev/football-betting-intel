@@ -943,6 +943,8 @@ def signals_history(
                 "outcome": r["outcome"],
                 "actual_pnl": r["actual_pnl"],
                 "bet_placed": (r["match_title"], r["description"]) in trade_lookup,
+                "composite_score": r["composite_score"] if "composite_score" in r.keys() else 0.0,
+                "score_breakdown": r["score_breakdown"] if "score_breakdown" in r.keys() else "",
             })
         return {"signals": signals, "total": total}
     finally:

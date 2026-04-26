@@ -60,6 +60,8 @@ export interface SignalHistoryEntry {
   outcome: string
   actual_pnl: number
   bet_placed: boolean
+  composite_score: number
+  score_breakdown: string
 }
 
 export interface SignalHistoryResponse {
