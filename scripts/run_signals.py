@@ -190,7 +190,8 @@ def main() -> int:
     print(f"\n[4/4] Generating signals (min edge: {args.min_edge:.0%})…")
     generator = SignalGenerator(model)
     signals = generator.generate_signals(matches, min_edge=args.min_edge)
-    print(f"      ✓ {len(signals)} signal(s) with edge ≥ {args.min_edge:.0%}")
+    placed = sum(1 for s in signals if getattr(s, 'composite_score', 0) >= 50)
+    print(f"      ✓ {len(signals)} signal(s) found, {placed} pass composite score ≥50")
 
     # ── Print results ────────────────────────────────────────────────────
     _print_signals(signals, top_n=args.top)

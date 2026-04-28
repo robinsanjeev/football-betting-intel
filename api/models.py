@@ -33,6 +33,7 @@ class Signal(BaseModel):
     league_emblem: str = "" # URL to league/competition emblem
     composite_score: float = 0.0     # 0-100 composite score (confidence-centric)
     score_breakdown: str = ""        # human-readable breakdown
+    kickoff_utc: Optional[str] = None  # ISO kickoff time
 
 
 class SignalResponse(Signal):

@@ -20,6 +20,7 @@ export interface Signal {
   league_emblem: string;
   composite_score: number;
   score_breakdown: string;
+  kickoff_utc: string | null;
   // Odds tracking fields (optional, populated client-side)
   is_persistent_edge?: boolean;
   is_new_signal?: boolean;

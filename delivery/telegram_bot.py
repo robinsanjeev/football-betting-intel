@@ -92,8 +92,20 @@ class TelegramClient:
         else:
             cs_emoji = "🔴"
 
+        # Format kickoff time
+        kickoff_str = ""
+        ko = getattr(signal, 'kickoff_utc', '')
+        if ko:
+            try:
+                from datetime import datetime as _dt
+                ko_dt = _dt.fromisoformat(ko.replace('Z', '+00:00'))
+                kickoff_str = f"\n📅 Kickoff: {ko_dt.strftime('%b %d, %H:%M UTC')}\n"
+            except Exception:
+                kickoff_str = f"\n📅 Kickoff: {ko}\n"
+
         text = (
             f"🔥 BET | {bet_emoji} {signal.bet_type} — {signal.match_title}\n"
+            f"{kickoff_str}"
             f"\n"
             f"{cs_emoji} Composite Score: {cs:.0f}/100\n"
             f"\n"

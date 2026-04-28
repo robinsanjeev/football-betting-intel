@@ -53,6 +53,7 @@ class BettingSignal:
     # ── Composite score fields (confidence-centric scoring) ───────────
     composite_score: float = 0.0      # 0-100 composite score
     score_breakdown: str = ""          # human-readable: "Confidence: 35/40, Data: 15/20, ..."
+    kickoff_utc: str = ""             # ISO format kickoff time (or empty if unknown)
 
 
 # ---------------------------------------------------------------------------
@@ -701,6 +702,7 @@ class SignalGenerator:
                 suggested_fraction=suggested_fraction,
                 composite_score=composite,
                 score_breakdown=breakdown,
+                kickoff_utc=match.kickoff_utc.isoformat() if match.kickoff_utc else "",
             )
             signal.reasoning = self._generate_reasoning(signal)
             signals.append(signal)

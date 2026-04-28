@@ -1,6 +1,28 @@
 import { useState } from 'react'
-import { ExternalLink, ShieldCheck, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
+import { ExternalLink, ShieldCheck, Sparkles, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
 import type { Signal } from '../types'
+
+function formatKickoff(iso: string | null): string | null {
+  if (!iso) return null
+  try {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return null
+    const now = new Date()
+    const diffMs = d.getTime() - now.getTime()
+    const diffH = Math.floor(diffMs / 3600000)
+    const diffD = Math.floor(diffMs / 86400000)
+    const timeStr = d.toLocaleString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+    })
+    if (diffMs < 0) return timeStr
+    if (diffH < 24) return `${timeStr} (in ${diffH}h)`
+    if (diffD < 7) return `${timeStr} (in ${diffD}d)`
+    return timeStr
+  } catch {
+    return null
+  }
+}
 
 interface SignalCardProps {
   signal: Signal
@@ -135,6 +157,12 @@ export default function SignalCard({ signal }: SignalCardProps) {
             <h3 className="text-[#e2e2f0] font-semibold text-sm leading-snug mt-0.5 truncate">
               {getMatchQuestion(signal)}
             </h3>
+            {signal.kickoff_utc && formatKickoff(signal.kickoff_utc) && (
+              <div className="flex items-center gap-1 mt-0.5">
+                <Calendar size={10} className="text-[#6b6b8a]" />
+                <span className="text-[10px] text-[#6b6b8a]">{formatKickoff(signal.kickoff_utc)}</span>
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">

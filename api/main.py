@@ -460,6 +460,7 @@ def _run_full_pipeline() -> Dict[str, Any]:
             "league_emblem": league_emblem,
             "composite_score": round(sig.composite_score, 1),
             "score_breakdown": sig.score_breakdown,
+            "kickoff_utc": sig.kickoff_utc or None,
         })
 
     return {
